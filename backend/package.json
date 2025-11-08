@@ -1,0 +1,20 @@
+{
+  "name": "potionflow-backend",
+  "version": "1.0.0",
+  "description": "Backend API for PotionFlow - Hackathon Project",
+  "main": "server.js",
+  "type": "module",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js",
+    "init-db": "node database/init.js"
+  },
+  "keywords": ["potion", "monitoring", "api"],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "express": "^4.18.2",
+    "cors": "^2.8.5",
+    "better-sqlite3": "^9.2.2"
+  }
+}
