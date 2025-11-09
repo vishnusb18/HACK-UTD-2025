@@ -18,21 +18,37 @@ router.get('/', async (req, res) => {
     }
     const data = await response.json();
     
-    let filteredData = data;
+    // Transform nested cauldron_levels into flat array
+    let transformedData = [];
+    data.forEach(record => {
+      if (record.cauldron_levels) {
+        // New format: {timestamp: "...", cauldron_levels: {cauldron_001: 640.35, ...}}
+        Object.entries(record.cauldron_levels).forEach(([cauldronId, volume]) => {
+          transformedData.push({
+            cauldronId: cauldronId,
+            volume: volume,
+            timestamp: record.timestamp
+          });
+        });
+      } else {
+        // Old format or already flat
+        transformedData.push(record);
+      }
+    });
     
     // Filter by cauldron_id if provided
     if (cauldron_id) {
-      filteredData = filteredData.filter(d => 
+      transformedData = transformedData.filter(d => 
         d.cauldronId === cauldron_id || d.cauldron_id === cauldron_id
       );
     }
     
     // Apply limit if provided
     if (limit) {
-      filteredData = filteredData.slice(0, parseInt(limit));
+      transformedData = transformedData.slice(0, parseInt(limit));
     }
     
-    res.json(filteredData);
+    res.json(transformedData);
   } catch (error) {
     console.error('Error fetching levels:', error);
     res.status(500).json({ error: error.message });
@@ -49,19 +65,29 @@ router.get('/latest', async (req, res) => {
     }
     const allData = await response.json();
     
-    // Group by cauldron and get latest for each
-    const latestByTank = {};
+    // Find the most recent record
+    let latestRecord = null;
+    let latestTimestamp = 0;
+    
     allData.forEach(record => {
-      const tankId = record.cauldronId || record.cauldron_id || record.tankId;
       const timestamp = new Date(record.timestamp || record.date).getTime();
-      
-      if (!latestByTank[tankId] || 
-          new Date(latestByTank[tankId].timestamp || latestByTank[tankId].date).getTime() < timestamp) {
-        latestByTank[tankId] = record;
+      if (timestamp > latestTimestamp) {
+        latestTimestamp = timestamp;
+        latestRecord = record;
       }
     });
     
-    res.json(Object.values(latestByTank));
+    // Transform the cauldron_levels object into an array of individual records
+    if (latestRecord && latestRecord.cauldron_levels) {
+      const result = Object.entries(latestRecord.cauldron_levels).map(([cauldronId, volume]) => ({
+        cauldronId: cauldronId,
+        volume: volume,
+        timestamp: latestRecord.timestamp
+      }));
+      res.json(result);
+    } else {
+      res.json([]);
+    }
   } catch (error) {
     console.error('Error fetching latest levels:', error);
     res.status(500).json({ error: error.message });
