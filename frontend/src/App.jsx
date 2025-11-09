@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import CauldronTable from './components/CauldronTable';
 import TicketTable from './components/TicketTable';
 import LevelChart from './components/LevelChart';
@@ -8,6 +8,9 @@ function App() {
   const [cauldrons, setCauldrons] = useState([]);
   const [tickets, setTickets] = useState([]);
   const [levels, setLevels] = useState([]);
+  // full historical level records (used for time slider)
+  const [allLevels, setAllLevels] = useState([]);
+  const [timeIndex, setTimeIndex] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [activeTab, setActiveTab] = useState('overview');
@@ -19,23 +22,28 @@ function App() {
   const fetchData = async () => {
     try {
       setLoading(true);
-      const [cauldronRes, ticketRes, levelRes] = await Promise.all([
+      // fetch latest for summary widgets and full history for the time slider
+      const [cauldronRes, ticketRes, latestRes, historyRes] = await Promise.all([
         fetch('/api/cauldrons'),
         fetch('/api/tickets'),
-        fetch('/api/levels/latest')
+        fetch('/api/levels/latest'),
+        // request all levels (backend proxies to HackUTD). This may be large — we normalize to minute resolution below.
+        fetch('/api/levels?start_date=0&end_date=2000000000')
       ]);
 
-      if (!cauldronRes.ok || !ticketRes.ok || !levelRes.ok) {
+      if (!cauldronRes.ok || !ticketRes.ok || !latestRes.ok || !historyRes.ok) {
         throw new Error('Failed to fetch data');
       }
 
-      const cauldronData = await cauldronRes.json();
-      const ticketData = await ticketRes.json();
-      const levelData = await levelRes.json();
+  const cauldronData = await cauldronRes.json();
+  const ticketData = await ticketRes.json();
+  const latestLevels = await latestRes.json();
+  const historyLevels = await historyRes.json();
 
-      setCauldrons(cauldronData);
-      setTickets(ticketData);
-      setLevels(levelData);
+  setCauldrons(cauldronData);
+  setTickets(ticketData);
+  setLevels(latestLevels);
+  setAllLevels(historyLevels || []);
       setError(null);
     } catch (err) {
       setError(err.message);
@@ -44,6 +52,39 @@ function App() {
       setLoading(false);
     }
   };
+
+  // derive sorted unique minute timestamps from allLevels
+  const timestamps = useMemo(() => {
+    if (!allLevels || allLevels.length === 0) return [];
+    const mins = new Set();
+    allLevels.forEach(r => {
+      const raw = r.timestamp || r.date || r.time;
+      const ts = raw ? new Date(raw).getTime() : NaN;
+      if (!isNaN(ts)) {
+        const minute = Math.floor(ts / 60000) * 60000;
+        mins.add(minute);
+      }
+    });
+    return Array.from(mins).sort((a, b) => a - b);
+  }, [allLevels]);
+
+  // default timeIndex to latest minute
+  useEffect(() => {
+    if (timestamps.length > 0 && timeIndex === null) {
+      setTimeIndex(timestamps.length - 1);
+    }
+  }, [timestamps, timeIndex]);
+
+  // compute snapshot of levels for the selected minute
+  const levelsAtSelectedTime = useMemo(() => {
+    if (!timestamps || timestamps.length === 0 || timeIndex === null) return levels;
+    const selectedMinute = timestamps[timeIndex];
+    return allLevels.filter(r => {
+      const raw = r.timestamp || r.date || r.time;
+      const ts = raw ? new Date(raw).getTime() : NaN;
+      return !isNaN(ts) && Math.floor(ts / 60000) * 60000 === selectedMinute;
+    });
+  }, [allLevels, timestamps, timeIndex, levels]);
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-purple-900 via-purple-800 to-indigo-900 p-6">
@@ -80,6 +121,8 @@ function App() {
         {/* Main Content */}
         {!loading && !error && (
           <>
+            
+
             {/* Stats Cards */}
             <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
               <div className="bg-white/10 backdrop-blur-md p-6 rounded-lg shadow-lg border border-white/20">
@@ -123,13 +166,13 @@ function App() {
             <div className="space-y-6">
               {activeTab === 'overview' && (
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                  <CauldronTable cauldrons={cauldrons} levels={levels} />
-                  <LevelChart levels={levels} />
+                  <CauldronTable cauldrons={cauldrons} levels={levelsAtSelectedTime} />
+                  <LevelChart levels={levelsAtSelectedTime} />
                 </div>
               )}
               
               {activeTab === 'cauldrons' && (
-                <CauldronTable cauldrons={cauldrons} levels={levels} detailed />
+                <CauldronTable cauldrons={cauldrons} levels={levelsAtSelectedTime} detailed />
               )}
               
               {activeTab === 'tickets' && (
@@ -140,6 +183,35 @@ function App() {
                 <ReconciliationPanel />
               )}
             </div>
+            {/* Time slider (if history available) - moved to bottom */}
+            {timestamps.length > 0 && (
+              <div className="mt-6 bg-white/5 p-4 rounded-lg border border-white/10">
+                <div className="flex items-center justify-between gap-4">
+                  <div className="flex-1">
+                    <label className="text-sm text-purple-200 block">Time</label>
+                    <div className="text-white font-semibold">
+                      {timeIndex !== null && timestamps[timeIndex]
+                        ? new Date(timestamps[timeIndex]).toLocaleString()
+                        : '—'}
+                    </div>
+                  </div>
+                  <div className="flex-1">
+                    <input
+                      type="range"
+                      min={0}
+                      max={Math.max(0, timestamps.length - 1)}
+                      value={timeIndex ?? 0}
+                      onChange={(e) => setTimeIndex(parseInt(e.target.value, 10))}
+                      className="w-full"
+                    />
+                    <div className="text-xs text-purple-300 mt-2 flex justify-between">
+                      <span>{timestamps.length ? new Date(timestamps[0]).toLocaleString() : ''}</span>
+                      <span>{timestamps.length ? new Date(timestamps[timestamps.length - 1]).toLocaleString() : ''}</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
           </>
         )}
       </div>
