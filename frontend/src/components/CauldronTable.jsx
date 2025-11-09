@@ -1,12 +1,17 @@
 import { useMemo } from 'react';
 
 function CauldronTable({ cauldrons, levels, detailed = false }) {
+  console.log('CauldronTable - cauldrons:', cauldrons);
+  console.log('CauldronTable - levels:', levels);
+  
   const cauldronData = useMemo(() => {
     return cauldrons.map(cauldron => {
       const cauldronId = cauldron.id || cauldron.cauldronId || cauldron.cauldron_id;
       const level = levels.find(l => 
         (l.cauldronId || l.cauldron_id || l.tankId) === cauldronId
       );
+      
+      console.log(`Cauldron ${cauldronId}:`, { cauldron, level, volume: level?.volume });
       
       const maxVolume = cauldron.maxVolume || cauldron.max_volume || 1000;
       const currentVolume = level?.volume || level?.level || 0;
