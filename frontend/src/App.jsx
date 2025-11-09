@@ -72,8 +72,13 @@ function Dashboard() {
       }
 
       // set what we have
-      setCauldrons(cauldronData || []);
-      setTickets(Array.isArray(ticketData) ? ticketData : (ticketData?.tickets || []));
+  setCauldrons(cauldronData || []);
+  // handle wrapper shapes from backend (some endpoints return { value: [...] } or { transport_tickets: [...] })
+  setTickets(
+    Array.isArray(ticketData)
+      ? ticketData
+      : (ticketData?.tickets || ticketData?.value || ticketData?.transport_tickets || [])
+  );
       setLevels(latestLevels || []);
       setAllLevels(historyLevels || []);
 

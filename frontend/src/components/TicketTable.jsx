@@ -12,6 +12,7 @@ function TicketTable({ tickets }) {
 
   return (
     <div className="bg-white/10 backdrop-blur-md rounded-lg shadow-lg border border-white/20 overflow-hidden">
+      {/* Debug panel removed for production - TicketTable now renders normalized data */}
       <div className="p-4 bg-white/5 border-b border-white/20">
         <div className="flex justify-between items-center">
           <h2 className="text-xl font-bold text-white">📜 Transport Tickets</h2>

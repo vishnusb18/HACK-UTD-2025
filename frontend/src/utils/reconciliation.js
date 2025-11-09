@@ -6,23 +6,28 @@ export async function loadTickets() {
   const res = await fetch('/api/tickets');
   if (!res.ok) throw new Error('Failed to load tickets');
   const data = await res.json();
-  // handle possible shapes: array, { tickets: [...] }, or error object
+  // handle possible shapes: array, { tickets: [...] }, { value: [...] }, { transport_tickets: [...] }
   let tickets = [];
-  if (Array.isArray(data)) tickets = data;
+  if (!data) tickets = [];
+  else if (Array.isArray(data)) tickets = data;
   else if (data && Array.isArray(data.tickets)) tickets = data.tickets;
+  else if (data && Array.isArray(data.value)) tickets = data.value;
+  else if (data && Array.isArray(data.transport_tickets)) tickets = data.transport_tickets;
   else if (data && data.error && typeof data.error === 'string') {
     // backend returned an error object
     console.warn('loadTickets: API returned error object', data.error);
     tickets = [];
   } else if (data && typeof data === 'object') {
-    // maybe single ticket
+    // maybe single ticket-like object
     tickets = [data];
   }
 
   return tickets.map(t => ({
     ...t,
     dateStr: t.date ? (new Date(t.date)).toISOString().slice(0, 10) : (t.timestamp ? new Date(t.timestamp).toISOString().slice(0,10) : null),
-    amount: Number(t.amount ?? t.volume ?? t.value ?? 0)
+    amount: Number(t.amount ?? t.volume ?? t.value ?? t.amount_collected ?? t.amountCollected ?? 0),
+    // normalize cauldron id field names for easier matching
+    cauldronId: t.cauldronId || t.cauldron_id || t.cauldron
   }));
 }
 
@@ -33,7 +38,27 @@ export async function fetchLevelsForDay(dateStr) {
   const end = Math.floor((new Date(day.getTime() + 24 * 3600 * 1000)).getTime() / 1000) - 1;
   const res = await fetch(`/api/levels?start_date=${start}&end_date=${end}`);
   if (!res.ok) throw new Error('Failed to fetch level data');
-  return res.json();
+  const data = await res.json();
+  // backend sometimes wraps results in { value: [...] }
+  const rows = Array.isArray(data) ? data : (data && Array.isArray(data.value) ? data.value : (data ? [data] : []));
+
+  // normalize rows into flattened per-cauldron entries: [{ cauldronId, volume, timestamp }, ...]
+  const out = [];
+  rows.forEach(rec => {
+    if (rec.cauldron_levels && typeof rec.cauldron_levels === 'object') {
+      const ts = rec.timestamp || rec.date || null;
+      Object.entries(rec.cauldron_levels).forEach(([id, vol]) => {
+        out.push({ cauldronId: id, volume: Number(vol), timestamp: ts });
+      });
+    } else if (rec.cauldronId || rec.cauldron_id || rec.id) {
+      // already a per-cauldron row
+      out.push({ cauldronId: rec.cauldronId || rec.cauldron_id || rec.id, volume: Number(rec.volume ?? rec.level ?? 0), timestamp: rec.timestamp || rec.date || null });
+    } else if (Array.isArray(rec.levels)) {
+      rec.levels.forEach(l => out.push({ cauldronId: l.cauldronId || l.cauldron_id || l.id, volume: Number(l.volume ?? l.level ?? 0), timestamp: l.timestamp || rec.timestamp || rec.date || null }));
+    }
+  });
+
+  return out;
 }
 
 export function computePerCauldronSeries(allLevels) {
