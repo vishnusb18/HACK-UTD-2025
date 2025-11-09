@@ -1,5 +1,4 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
-import { Link } from 'react-router-dom';
 
 function MapView() {
   const [cauldrons, setCauldrons] = useState([]);
@@ -18,7 +17,7 @@ function MapView() {
 
   // Map dimensions and projection
   const mapWidth = 3200;
-  const mapHeight = 1800;
+  const mapHeight = 1200;
   const padding = 220;
 
   useEffect(() => {
@@ -204,7 +203,7 @@ function MapView() {
   const getFillColor = (percentage) => {
     if (percentage >= 90) return '#ef4444'; // red - critical
     if (percentage >= 70) return '#f59e0b'; // orange - warning
-    if (percentage >= 40) return '#10b981'; // green - good
+    if (percentage >= 20) return '#10b981'; // green - ok
     return '#6366f1'; // purple - low
   };
 
@@ -373,7 +372,7 @@ function MapView() {
           fontSize="48"
           fontWeight="bold"
         >
-          🏪 Market
+          Market
         </text>
       </g>
     );
@@ -519,7 +518,7 @@ function MapView() {
           x={boxX}
           y={adjustedLabelY - 78}
           width={boxWidth}
-          height={boxHeight}
+          height={boxHeight - 10}
           fill="rgba(17, 24, 39, 0.95)"
           stroke="#6366f1"
           strokeWidth="3"
@@ -565,67 +564,51 @@ function MapView() {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-purple-900 via-purple-800 to-indigo-900 p-3 flex flex-col overflow-hidden">
-      <div className="max-w-[3000px] mx-auto w-full flex flex-col h-screen">
-        {/* Header */}
-        <header className="mb-2 flex-shrink-0">
-          <div className="flex justify-between items-center">
-            <h1 className="text-3xl font-bold text-white flex items-center gap-3">
-              🗺️ Map
-            </h1>
-            <Link
-              to="/"
-              className="px-5 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-lg font-semibold transition shadow-lg"
-            >
-              ← Back to Dashboard
-            </Link>
-          </div>
-        </header>
+    <div className="flex flex-col h-[750px]">
+      {/* Error Display */}
+      {error && (
+        <div className="bg-red-500 text-white p-3 rounded-lg mb-2 shadow-lg flex-shrink-0">
+          <p className="font-semibold text-sm">⚠️ Error: {error}</p>
+          <button 
+            onClick={fetchMapData}
+            className="mt-2 px-3 py-1 bg-red-700 hover:bg-red-600 rounded transition text-sm"
+          >
+            Retry
+          </button>
+        </div>
+      )}
 
-        {/* Error Display */}
-        {error && (
-          <div className="bg-red-500 text-white p-3 rounded-lg mb-2 shadow-lg flex-shrink-0">
-            <p className="font-semibold text-sm">⚠️ Error: {error}</p>
-            <button 
-              onClick={fetchMapData}
-              className="mt-2 px-3 py-1 bg-red-700 hover:bg-red-600 rounded transition text-sm"
-            >
-              Retry
-            </button>
+      {/* Loading State */}
+      {loading && (
+        <div className="text-center py-12 flex-1 flex items-center justify-center">
+          <div>
+            <div className="inline-block animate-spin rounded-full h-12 w-12 border-4 border-purple-300 border-t-white"></div>
+            <p className="text-white mt-4">Loading map data...</p>
           </div>
-        )}
+        </div>
+      )}
 
-        {/* Loading State */}
-        {loading && (
-          <div className="text-center py-12 flex-1 flex items-center justify-center">
-            <div>
-              <div className="inline-block animate-spin rounded-full h-12 w-12 border-4 border-purple-300 border-t-white"></div>
-              <p className="text-white mt-4">Loading map data...</p>
-            </div>
-          </div>
-        )}
-
-        {/* Map Container */}
-        {!loading && !error && (
-          <div className="bg-white/10 backdrop-blur-md rounded-lg shadow-2xl border border-white/20 p-3 relative flex-1 flex flex-col overflow-hidden">
+      {/* Map Container */}
+      {!loading && !error && (
+        <div className="bg-white/10 backdrop-blur-md rounded-lg shadow-2xl border border-white/20 p-3 relative flex-1 flex flex-col overflow-hidden min-h-0">
             {/* Legend */}
-            <div className="absolute top-20 right-3 bg-gray-900/90 p-5 rounded-lg shadow-lg z-10">
-              <div className="text-white font-semibold mb-3 text-lg">Legend</div>
-              <div className="space-y-2.5 text-base">
-                <div className="flex items-center gap-3">
-                  <div className="w-5 h-5 rounded" style={{ backgroundColor: '#6366f1' }}></div>
-                  <span className="text-gray-300">Low (&lt;40%)</span>
+            <div className="absolute bottom-3 right-3 bg-gray-900/90 p-3 rounded-lg shadow-lg z-10">
+              <div className="text-white font-semibold mb-1.5 text-sm">Legend</div>
+              <div className="space-y-1 text-xs">
+                <div className="flex items-center gap-2">
+                  <div className="w-3 h-3 rounded" style={{ backgroundColor: '#6366f1' }}></div>
+                  <span className="text-gray-300">Low (&lt;20%)</span>
                 </div>
-                <div className="flex items-center gap-3">
-                  <div className="w-5 h-5 rounded" style={{ backgroundColor: '#10b981' }}></div>
-                  <span className="text-gray-300">Good (40-70%)</span>
+                <div className="flex items-center gap-2">
+                  <div className="w-3 h-3 rounded" style={{ backgroundColor: '#10b981' }}></div>
+                  <span className="text-gray-300">OK (20-70%)</span>
                 </div>
-                <div className="flex items-center gap-3">
-                  <div className="w-5 h-5 rounded" style={{ backgroundColor: '#f59e0b' }}></div>
+                <div className="flex items-center gap-2">
+                  <div className="w-3 h-3 rounded" style={{ backgroundColor: '#f59e0b' }}></div>
                   <span className="text-gray-300">Warning (70-90%)</span>
                 </div>
-                <div className="flex items-center gap-3">
-                  <div className="w-5 h-5 rounded" style={{ backgroundColor: '#ef4444' }}></div>
+                <div className="flex items-center gap-2">
+                  <div className="w-3 h-3 rounded" style={{ backgroundColor: '#ef4444' }}></div>
                   <span className="text-gray-300">Critical (&gt;90%)</span>
                 </div>
               </div>
@@ -654,12 +637,12 @@ function MapView() {
             )}
 
             {/* SVG Map - Centered and fills available space */}
-            <div ref={containerRef} className="relative bg-slate-900/50 rounded-lg flex-1 flex items-center justify-center overflow-hidden">
+            <div ref={containerRef} className="relative bg-slate-900/50 rounded-lg flex-1 flex items-center justify-center overflow-hidden min-h-0">
               <svg
                 ref={svgRef}
                 width={mapWidth}
                 height={mapHeight}
-                className="max-w-full max-h-full"
+                className="max-w-full max-h-full w-full h-full"
                 viewBox={`0 0 ${mapWidth} ${mapHeight}`}
                 preserveAspectRatio="xMidYMid meet"
               >
@@ -730,7 +713,6 @@ function MapView() {
             {hoveredNode && renderTooltip()}
           </div>
         )}
-      </div>
     </div>
   );
 }
