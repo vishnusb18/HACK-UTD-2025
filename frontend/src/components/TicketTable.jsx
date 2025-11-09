@@ -40,8 +40,8 @@ function TicketTable({ tickets }) {
     ticketsByDate[k].sort((a, b) => ('' + a.cauldronId).localeCompare('' + b.cauldronId));
   });
 
-  // sorted date keys (latest first)
-  const sortedDateKeys = Object.keys(ticketsByDate).sort((a, b) => b.localeCompare(a));
+  // sorted date keys (ascending)
+  const sortedDateKeys = Object.keys(ticketsByDate).sort((a, b) => a.localeCompare(b));
 
   const [expandedDays, setExpandedDays] = useState({});
 
@@ -54,7 +54,7 @@ function TicketTable({ tickets }) {
           <select
             value={filterCauldron}
             onChange={(e) => setFilterCauldron(e.target.value)}
-            className="bg-white/10 border border-white/20 text-white rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-purple-500"
+            className="bg-purple-800 border border-purple-600 text-white rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-purple-400"
           >
             <option value="">All Cauldrons</option>
             {uniqueCauldrons.map(id => (
@@ -90,10 +90,19 @@ function TicketTable({ tickets }) {
                     <div className="text-sm text-purple-200">Tickets: <span className="text-white font-semibold">{visibleRows.length}</span></div>
                     <button
                       onClick={() => setExpandedDays({ ...expandedDays, [dateKey]: !expanded })}
-                      className="px-3 py-1 bg-purple-700 hover:bg-purple-600 text-white rounded text-sm"
+                      className="p-2 bg-transparent hover:bg-purple-700/30 text-white rounded-full"
                       aria-expanded={expanded}
+                      title={expanded ? 'Collapse' : 'Expand'}
                     >
-                      {expanded ? 'Collapse ▴' : 'Expand ▾'}
+                      <svg
+                        className={`w-5 h-5 transform transition-transform ${expanded ? '-rotate-90' : 'rotate-90'}`}
+                        viewBox="0 0 20 20"
+                        fill="none"
+                        xmlns="http://www.w3.org/2000/svg"
+                        aria-hidden="true"
+                      >
+                        <path d="M6 4L14 10L6 16" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+                      </svg>
                     </button>
                   </div>
                 </div>
