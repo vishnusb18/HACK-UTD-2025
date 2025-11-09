@@ -201,7 +201,7 @@ function Dashboard() {
         <header className="mb-8">
           <div>
             <h1 className="text-4xl font-bold text-white mb-2 flex items-center gap-3">
-              🧙‍♀️ PotionFlow Monitoring Dashboard
+              🧙‍♀️ Poyo's Potion Dashboard
             </h1>
             <p className="text-purple-200">Real-time potion tracking and discrepancy detection</p>
           </div>

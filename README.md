@@ -1,6 +1,8 @@
 # 🧙‍♀️ PotionFlow - Potion Monitoring Dashboard
 
-A real-time potion flow monitoring system for tracking cauldron levels, transport tickets, and detecting discrepancies in potion collections at Poyo's Potion Factory.
+# 🧙‍♀️ Poyo's Potion Dashboard
+
+A real-time monitoring dashboard for tracking potion levels across magical cauldrons in the Enchanted Market.
 
 ## 🏗️ Project Structure
 
