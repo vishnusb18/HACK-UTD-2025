@@ -24,46 +24,10 @@ function RouteSchedule({ optimizationResult, cauldrons }) {
 
   return (
     <div className="space-y-4">
-      {/* Statistics Panel */}
+      {/* Simplified Statistics - Just Minimum Witches */}
       <div className="bg-gradient-to-r from-purple-900/50 to-pink-900/50 backdrop-blur-md rounded-lg shadow-lg border border-white/20 p-6">
-        <h2 className="text-2xl font-bold text-white mb-4">📊 Optimization Results</h2>
-        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
-          <div className="bg-white/10 rounded-lg p-4">
-            <div className="text-purple-200 text-sm mb-1">Minimum Witches</div>
-            <div className="text-3xl font-bold text-white">{stats.minWitches || routes.length}</div>
-          </div>
-          <div className="bg-white/10 rounded-lg p-4">
-            <div className="text-purple-200 text-sm mb-1">Cycle Time</div>
-            <div className="text-3xl font-bold text-white">{stats.cycleTimeHours}h</div>
-          </div>
-          <div className="bg-white/10 rounded-lg p-4">
-            <div className="text-purple-200 text-sm mb-1">Total Volume/Cycle</div>
-            <div className="text-3xl font-bold text-white">{stats.totalVolume}L</div>
-          </div>
-          <div className="bg-white/10 rounded-lg p-4">
-            <div className="text-purple-200 text-sm mb-1">Capacity Usage</div>
-            <div className="text-3xl font-bold text-white">{stats.avgCapacityUtilization}%</div>
-          </div>
-          <div className="bg-white/10 rounded-lg p-4">
-            <div className="text-purple-200 text-sm mb-1">Cycles Per Day</div>
-            <div className="text-3xl font-bold text-white">{dailySchedule.cyclesPerDay}</div>
-          </div>
-        </div>
-        
-        <div className="mt-4 p-4 bg-green-500/20 border border-green-500 rounded-lg">
-          <div className="flex items-center gap-2 text-green-200">
-            <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
-              <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
-            </svg>
-            <span className="font-semibold">
-              This schedule ensures NO cauldron overflows - repeatable indefinitely!
-            </span>
-          </div>
-          <div className="text-green-300 text-sm mt-2">
-            Maximum safe cycle time: {(maxCycleTime / 60).toFixed(1)} hours. 
-            Schedule must be repeated every {stats.cycleTimeHours} hours to prevent overflow.
-          </div>
-        </div>
+        <div className="text-purple-200 text-sm mb-1">Minimum Witches Needed</div>
+        <div className="text-5xl font-bold text-white">{stats.minWitches || routes.length}</div>
       </div>
 
       {/* Daily Schedule Selector */}
@@ -123,8 +87,7 @@ function RouteSchedule({ optimizationResult, cauldrons }) {
                     <div>
                       <h3 className="text-xl font-bold text-white">{witchRoute.witchName}</h3>
                       <div className="text-sm text-purple-200">
-                        {witchRoute.trips.length} trips • {totalStops} stops • {totalVolume.toFixed(0)}L • 
-                        {(totalTime / 60).toFixed(1)}h total
+                        {witchRoute.trips.length} trips • {totalStops} stops • {totalVolume.toFixed(0)}L • {(totalTime / 60).toFixed(1)}h cycle
                       </div>
                     </div>
                   </div>

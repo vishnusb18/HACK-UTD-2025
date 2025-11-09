@@ -22,6 +22,7 @@ function Dashboard() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [activeTab, setActiveTab] = useState('overview');
+  const [overviewSubTab, setOverviewSubTab] = useState('map');
   const [couriers, setCouriers] = useState([]);
   const [market, setMarket] = useState(null);
   const [network, setNetwork] = useState({ edges: [], description: '' });
@@ -41,12 +42,6 @@ function Dashboard() {
         const r = await fetch('/api/cauldrons');
         if (!r.ok) throw new Error(`status ${r.status}`);
         cauldronData = await r.json();
-        
-        // Debug: Show cauldron ID/name mapping from API
-        console.log('🔍 Cauldron data from API:');
-        cauldronData.forEach(c => {
-          console.log(`  ${c.id || c.cauldron_id}: "${c.name || c.cauldron_name}"`);
-        });
       } catch (e) {
         errors.push(`cauldrons: ${e.message}`);
       }
@@ -192,12 +187,12 @@ function Dashboard() {
     }
     
     try {
-      return optimizeRoutes(cauldrons, levels, market, network, couriers);
+      return optimizeRoutes(cauldrons, levels, market, network, couriers, allLevels);
     } catch (err) {
       console.error('Route optimization failed:', err);
       return null;
     }
-  }, [cauldrons, levels, market, network, couriers]);
+  }, [cauldrons, levels, market, network, couriers, allLevels]);
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-purple-900 via-purple-800 to-indigo-900 p-6">
@@ -257,7 +252,7 @@ function Dashboard() {
             {/* Tabs */}
             <div className="mb-6">
               <div className="flex gap-2 bg-white/10 backdrop-blur-md p-2 rounded-lg border border-white/20">
-                {['overview', 'cauldrons', 'tickets', 'routes', 'reconcile'].map((tab) => (
+                {['overview', 'cauldrons', 'tickets', 'reconcile'].map((tab) => (
                   <button
                     key={tab}
                     onClick={() => setActiveTab(tab)}
@@ -276,8 +271,68 @@ function Dashboard() {
             {/* Tab Content */}
             <div className="space-y-6">
               {activeTab === 'overview' && (
-                <div className="bg-white/10 backdrop-blur-md rounded-lg shadow-2xl border border-white/20 p-3">
-                  <MapView />
+                <div className="space-y-6">
+                  {/* Sub-tabs for Overview */}
+                  <div className="flex gap-2 bg-white/10 backdrop-blur-md p-2 rounded-lg border border-white/20">
+                    {['map', 'routes'].map((subTab) => (
+                      <button
+                        key={subTab}
+                        onClick={() => setOverviewSubTab(subTab)}
+                        className={`flex-1 py-2 px-4 rounded transition font-semibold ${
+                          overviewSubTab === subTab
+                            ? 'bg-purple-500 text-white shadow-lg'
+                            : 'text-purple-200 hover:bg-white/10'
+                        }`}
+                      >
+                        {subTab.charAt(0).toUpperCase() + subTab.slice(1)}
+                      </button>
+                    ))}
+                  </div>
+
+                  {/* Map View */}
+                  {overviewSubTab === 'map' && (
+                    <div className="bg-white/10 backdrop-blur-md rounded-lg shadow-2xl border border-white/20 p-3">
+                      <MapView />
+                    </div>
+                  )}
+
+                  {/* Routes View */}
+                  {overviewSubTab === 'routes' && (
+                    <div className="space-y-6">
+                      {/* Route Visualization */}
+                      <div className="bg-white/10 backdrop-blur-md rounded-lg shadow-2xl border border-white/20 p-3">
+                        <div className="mb-4">
+                          <h2 className="text-2xl font-bold text-white">🗺️ Optimized Courier Routes</h2>
+                          <p className="text-purple-200 text-sm mt-1">
+                            Visual representation of optimal witch routes to prevent cauldron overflow
+                          </p>
+                        </div>
+                        {optimizationResult ? (
+                          <RouteVisualization 
+                            routes={optimizationResult.routes}
+                            cauldrons={cauldrons}
+                            market={market}
+                            network={network}
+                            isAnimating={false}
+                            animationTime={0}
+                          />
+                        ) : (
+                          <div className="text-center py-12 text-purple-200">
+                            <p>Route optimization in progress...</p>
+                            <p className="text-sm mt-2">Ensure couriers, market, and network data are loaded</p>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Route Schedule */}
+                      <div>
+                        <RouteSchedule 
+                          optimizationResult={optimizationResult}
+                          cauldrons={cauldrons}
+                        />
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
               
@@ -321,6 +376,7 @@ function Dashboard() {
                           <th className="px-4 py-3 text-left text-xs font-semibold text-purple-200 uppercase">Fill %</th>
                           <th className="px-4 py-3 text-left text-xs font-semibold text-purple-200 uppercase">Max Vol</th>
                           <th className="px-4 py-3 text-left text-xs font-semibold text-purple-200 uppercase">Fill Rate</th>
+                          <th className="px-4 py-3 text-left text-xs font-semibold text-purple-200 uppercase">Drain Rate</th>
                           <th className="px-4 py-3 text-left text-xs font-semibold text-purple-200 uppercase">Location</th>
                           <th className="px-4 py-3 text-left text-xs font-semibold text-purple-200 uppercase">Status</th>
                         </tr>
@@ -334,6 +390,9 @@ function Dashboard() {
                           const currentVolume = levelData?.level || levelData?.volume || 0;
                           const maxVolume = cauldron.maxVolume || cauldron.max_volume || 1000;
                           const fillPercentage = (currentVolume / maxVolume * 100);
+                          
+                          // Get drain rate from optimization result
+                          const drainRate = optimizationResult?.drainRates?.[cauldronId] || null;
                           
                           // Status logic: Low/OK/Warning/Critical
                           let status, statusColor;
@@ -370,6 +429,9 @@ function Dashboard() {
                               <td className="px-4 py-3 text-sm text-purple-200">{maxVolume} L</td>
                               <td className="px-4 py-3 text-sm text-purple-200">{(cauldron.fillRate || cauldron.fill_rate || 0).toFixed(2)} L/min</td>
                               <td className="px-4 py-3 text-sm text-purple-200">
+                                {drainRate !== null ? `${drainRate.toFixed(2)} L/min` : 'Calculating...'}
+                              </td>
+                              <td className="px-4 py-3 text-sm text-purple-200">
                                 {(cauldron.latitude || cauldron.lat || 0).toFixed(4)}, {(cauldron.longitude || cauldron.lon || cauldron.long || 0).toFixed(4)}
                               </td>
                               <td className="px-4 py-3">
@@ -382,43 +444,6 @@ function Dashboard() {
                         })}
                       </tbody>
                     </table>
-                  </div>
-                </div>
-              )}
-
-              {activeTab === 'routes' && (
-                <div className="space-y-6">
-                  {/* Route Visualization */}
-                  <div className="bg-white/10 backdrop-blur-md rounded-lg shadow-2xl border border-white/20 p-3">
-                    <div className="mb-4">
-                      <h2 className="text-2xl font-bold text-white">🗺️ Optimized Courier Routes</h2>
-                      <p className="text-purple-200 text-sm mt-1">
-                        Visual representation of optimal witch routes to prevent cauldron overflow
-                      </p>
-                    </div>
-                    {optimizationResult ? (
-                      <RouteVisualization 
-                        routes={optimizationResult.routes}
-                        cauldrons={cauldrons}
-                        market={market}
-                        network={network}
-                        isAnimating={false}
-                        animationTime={0}
-                      />
-                    ) : (
-                      <div className="text-center py-12 text-purple-200">
-                        <p>Route optimization in progress...</p>
-                        <p className="text-sm mt-2">Ensure couriers, market, and network data are loaded</p>
-                      </div>
-                    )}
-                  </div>
-
-                  {/* Route Schedule */}
-                  <div>
-                    <RouteSchedule 
-                      optimizationResult={optimizationResult}
-                      cauldrons={cauldrons}
-                    />
                   </div>
                 </div>
               )}
