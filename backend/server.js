@@ -13,11 +13,15 @@ import cauldronRoutes from './routes/cauldrons.js';
 import ticketRoutes from './routes/tickets.js';
 import levelRoutes from './routes/levels.js';
 import reconcileRoutes from './routes/reconcile.js';
+import informationRoutes from './routes/information.js';
+import levelDetailRoutes from './routes/levelDetail.js';
 
 app.use('/api/cauldrons', cauldronRoutes);
 app.use('/api/tickets', ticketRoutes);
 app.use('/api/levels', levelRoutes);
 app.use('/api/reconcile', reconcileRoutes);
+app.use('/api/information', informationRoutes);
+app.use('/api/level', levelDetailRoutes);
 
 // Health check
 app.get('/api/health', (req, res) => {
