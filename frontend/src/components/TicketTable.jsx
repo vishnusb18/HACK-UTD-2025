@@ -3,12 +3,12 @@ import { useState } from 'react';
 function TicketTable({ tickets }) {
   const [filterCauldron, setFilterCauldron] = useState('');
 
-  const filteredTickets = tickets.filter(ticket => {
-    const cauldronId = ticket.cauldronId || ticket.cauldron_id;
+  const filteredTickets = (Array.isArray(tickets) ? tickets : []).filter(ticket => {
+    const cauldronId = ticket.cauldronId || ticket.cauldron_id || ticket.cauldron;
     return filterCauldron === '' || cauldronId === filterCauldron;
   });
 
-  const uniqueCauldrons = [...new Set(tickets.map(t => t.cauldronId || t.cauldron_id))];
+  const uniqueCauldrons = [...new Set((Array.isArray(tickets) ? tickets : []).map(t => t.cauldronId || t.cauldron_id || t.cauldron).filter(Boolean))];
 
   return (
     <div className="bg-white/10 backdrop-blur-md rounded-lg shadow-lg border border-white/20 overflow-hidden">
@@ -41,14 +41,19 @@ function TicketTable({ tickets }) {
             {filteredTickets.length === 0 ? (
               <tr>
                 <td colSpan="4" className="px-4 py-8 text-center text-purple-300">
-                  No tickets found
+                  {tickets && tickets.length > 0
+                    ? 'No tickets match the filter.'
+                    : 'No tickets found'}
+                  {tickets && tickets.length > 0 && (
+                    <div className="text-xs text-purple-400 mt-2">Total tickets: {tickets.length}</div>
+                  )}
                 </td>
               </tr>
             ) : (
               filteredTickets.map((ticket) => {
-                const ticketId = ticket.id || ticket.ticketId || ticket.ticket_id;
-                const cauldronId = ticket.cauldronId || ticket.cauldron_id;
-                const volumeCollected = ticket.volume || ticket.volumeCollected || ticket.volume_collected || 0;
+                const ticketId = ticket.id || ticket.ticketId || ticket.ticket_id || ticket.ticketId;
+                const cauldronId = ticket.cauldronId || ticket.cauldron_id || ticket.cauldron;
+                const volumeCollected = ticket.volume || ticket.volumeCollected || ticket.volume_collected || ticket.amount_collected || 0;
                 const ticketDate = ticket.date || ticket.timestamp;
                 
                 return (
@@ -59,7 +64,7 @@ function TicketTable({ tickets }) {
                       {new Date(ticketDate).toLocaleDateString()}
                     </td>
                     <td className="px-4 py-3 text-sm text-purple-200">
-                      <span className="font-semibold text-white">{volumeCollected.toFixed(2)}</span> L
+                        <span className="font-semibold text-white">{(Number(volumeCollected) || 0).toFixed(2)}</span> L
                     </td>
                   </tr>
                 );
