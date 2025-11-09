@@ -1,10 +1,13 @@
 import { useState, useEffect } from 'react';
+import { BrowserRouter as Router, Routes, Route, Link } from 'react-router-dom';
 import CauldronTable from './components/CauldronTable';
 import TicketTable from './components/TicketTable';
 import LevelChart from './components/LevelChart';
 import ReconciliationPanel from './components/ReconciliationPanel';
+import MapView from './components/MapView';
+import CauldronDetail from './components/CauldronDetail';
 
-function App() {
+function Dashboard() {
   const [cauldrons, setCauldrons] = useState([]);
   const [tickets, setTickets] = useState([]);
   const [levels, setLevels] = useState([]);
@@ -50,10 +53,20 @@ function App() {
       <div className="max-w-7xl mx-auto">
         {/* Header */}
         <header className="mb-8">
-          <h1 className="text-4xl font-bold text-white mb-2 flex items-center gap-3">
-            🧙‍♀️ PotionFlow Monitoring Dashboard
-          </h1>
-          <p className="text-purple-200">Real-time potion tracking and discrepancy detection</p>
+          <div className="flex justify-between items-start">
+            <div>
+              <h1 className="text-4xl font-bold text-white mb-2 flex items-center gap-3">
+                🧙‍♀️ PotionFlow Monitoring Dashboard
+              </h1>
+              <p className="text-purple-200">Real-time potion tracking and discrepancy detection</p>
+            </div>
+            <Link
+              to="/map"
+              className="px-6 py-3 bg-purple-600 hover:bg-purple-700 text-white rounded-lg font-semibold transition shadow-lg"
+            >
+              🗺️ View Map
+            </Link>
+          </div>
         </header>
 
         {/* Error Display */}
@@ -144,6 +157,18 @@ function App() {
         )}
       </div>
     </div>
+  );
+}
+
+function App() {
+  return (
+    <Router>
+      <Routes>
+        <Route path="/" element={<Dashboard />} />
+        <Route path="/map" element={<MapView />} />
+        <Route path="/cauldron/:id" element={<CauldronDetail />} />
+      </Routes>
+    </Router>
   );
 }
 
