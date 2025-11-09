@@ -1,5 +1,5 @@
 
-import { BrowserRouter as Router, Routes, Route, Link } from 'react-router-dom';
+import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
 import { useState, useEffect, useMemo } from 'react';
 import CauldronTable from './components/CauldronTable';
 import TicketTable from './components/TicketTable';
@@ -7,7 +7,10 @@ import LevelChart from './components/LevelChart';
 import ReconciliationPanel from './components/ReconciliationPanel';
 import MapView from './components/MapView';
 import CauldronDetail from './components/CauldronDetail';
+import RouteVisualization from './components/RouteVisualization';
+import RouteSchedule from './components/RouteSchedule';
 import { computePerCauldronSeries, aggregateDrainsPerCauldron } from './utils/reconciliation';
+import { optimizeRoutes } from './utils/routeOptimizer';
 
 function Dashboard() {
   const [cauldrons, setCauldrons] = useState([]);
@@ -19,6 +22,9 @@ function Dashboard() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [activeTab, setActiveTab] = useState('overview');
+  const [couriers, setCouriers] = useState([]);
+  const [market, setMarket] = useState(null);
+  const [network, setNetwork] = useState({ edges: [], description: '' });
 
   useEffect(() => {
     fetchData();
@@ -35,6 +41,12 @@ function Dashboard() {
         const r = await fetch('/api/cauldrons');
         if (!r.ok) throw new Error(`status ${r.status}`);
         cauldronData = await r.json();
+        
+        // Debug: Show cauldron ID/name mapping from API
+        console.log('🔍 Cauldron data from API:');
+        cauldronData.forEach(c => {
+          console.log(`  ${c.id || c.cauldron_id}: "${c.name || c.cauldron_name}"`);
+        });
       } catch (e) {
         errors.push(`cauldrons: ${e.message}`);
       }
@@ -72,6 +84,36 @@ function Dashboard() {
         errors.push(`levels/history: ${e.message}`);
       }
 
+      // Fetch couriers
+      let courierData = [];
+      try {
+        const r = await fetch('/api/information/couriers');
+        if (!r.ok) throw new Error(`status ${r.status}`);
+        courierData = await r.json();
+      } catch (e) {
+        errors.push(`couriers: ${e.message}`);
+      }
+
+      // Fetch market
+      let marketData = null;
+      try {
+        const r = await fetch('/api/information/market');
+        if (!r.ok) throw new Error(`status ${r.status}`);
+        marketData = await r.json();
+      } catch (e) {
+        errors.push(`market: ${e.message}`);
+      }
+
+      // Fetch network
+      let networkData = { edges: [], description: '' };
+      try {
+        const r = await fetch('/api/information/network');
+        if (!r.ok) throw new Error(`status ${r.status}`);
+        networkData = await r.json();
+      } catch (e) {
+        errors.push(`network: ${e.message}`);
+      }
+
       // compute fill rates from historical level data and merge into cauldron objects
       let enrichedCauldrons = cauldronData || [];
       try {
@@ -94,6 +136,9 @@ function Dashboard() {
   );
       setLevels(latestLevels || []);
       setAllLevels(historyLevels || []);
+      setCouriers(courierData || []);
+      setMarket(marketData);
+      setNetwork(networkData);
 
       if (errors.length) {
         throw new Error('Failed to fetch: ' + errors.join('; '));
@@ -140,24 +185,30 @@ function Dashboard() {
     });
   }, [allLevels, timestamps, timeIndex, levels]);
 
+  // Optimize routes for minimum witches needed
+  const optimizationResult = useMemo(() => {
+    if (cauldrons.length === 0 || levels.length === 0 || couriers.length === 0 || !market) {
+      return null;
+    }
+    
+    try {
+      return optimizeRoutes(cauldrons, levels, market, network, couriers);
+    } catch (err) {
+      console.error('Route optimization failed:', err);
+      return null;
+    }
+  }, [cauldrons, levels, market, network, couriers]);
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-purple-900 via-purple-800 to-indigo-900 p-6">
       <div className="max-w-7xl mx-auto">
         {/* Header */}
         <header className="mb-8">
-          <div className="flex justify-between items-start">
-            <div>
-              <h1 className="text-4xl font-bold text-white mb-2 flex items-center gap-3">
-                🧙‍♀️ PotionFlow Monitoring Dashboard
-              </h1>
-              <p className="text-purple-200">Real-time potion tracking and discrepancy detection</p>
-            </div>
-            <Link
-              to="/map"
-              className="px-6 py-3 bg-purple-600 hover:bg-purple-700 text-white rounded-lg font-semibold transition shadow-lg"
-            >
-              🗺️ View Map
-            </Link>
+          <div>
+            <h1 className="text-4xl font-bold text-white mb-2 flex items-center gap-3">
+              🧙‍♀️ PotionFlow Monitoring Dashboard
+            </h1>
+            <p className="text-purple-200">Real-time potion tracking and discrepancy detection</p>
           </div>
         </header>
 
@@ -206,7 +257,7 @@ function Dashboard() {
             {/* Tabs */}
             <div className="mb-6">
               <div className="flex gap-2 bg-white/10 backdrop-blur-md p-2 rounded-lg border border-white/20">
-                {['overview', 'cauldrons', 'tickets', 'reconcile'].map((tab) => (
+                {['overview', 'cauldrons', 'tickets', 'routes', 'reconcile'].map((tab) => (
                   <button
                     key={tab}
                     onClick={() => setActiveTab(tab)}
@@ -225,16 +276,153 @@ function Dashboard() {
             {/* Tab Content */}
             <div className="space-y-6">
               {activeTab === 'overview' && (
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                  <CauldronTable cauldrons={cauldrons} levels={levelsAtSelectedTime} />
-                  <LevelChart levels={levelsAtSelectedTime} />
+                <div className="bg-white/10 backdrop-blur-md rounded-lg shadow-2xl border border-white/20 p-3">
+                  <MapView />
                 </div>
               )}
               
               {activeTab === 'cauldrons' && (
-                <CauldronTable cauldrons={cauldrons} levels={levelsAtSelectedTime} detailed />
+                <div className="bg-white/10 backdrop-blur-md rounded-lg shadow-lg border border-white/20 overflow-hidden">
+                  {/* Cauldron Status Header */}
+                  <div className="p-4 bg-white/5 border-b border-white/20">
+                    <h2 className="text-xl font-bold text-white">🔮 Cauldrons Status</h2>
+                  </div>
+                  
+                  {/* Time Slider */}
+                  {timestamps.length > 0 && (
+                    <div className="p-4 bg-black/30 border-b border-white/20">
+                      <div className="flex items-center gap-4">
+                        <span className="text-white font-semibold text-sm whitespace-nowrap">Time:</span>
+                        <input
+                          type="range"
+                          min="0"
+                          max={timestamps.length - 1}
+                          value={timeIndex ?? timestamps.length - 1}
+                          onChange={(e) => setTimeIndex(parseInt(e.target.value, 10))}
+                          className="flex-1 h-2 bg-purple-600 rounded-lg appearance-none cursor-pointer accent-purple-500"
+                        />
+                        <span className="text-purple-200 font-mono text-sm whitespace-nowrap">
+                          {timeIndex !== null && timestamps[timeIndex]
+                            ? new Date(timestamps[timeIndex]).toLocaleString()
+                            : 'Latest'}
+                        </span>
+                      </div>
+                    </div>
+                  )}
+                  
+                  {/* Table */}
+                  <div className="overflow-x-auto">
+                    <table className="w-full">
+                      <thead className="bg-white/5 border-b border-white/20">
+                        <tr>
+                          <th className="px-4 py-3 text-left text-xs font-semibold text-purple-200 uppercase">ID</th>
+                          <th className="px-4 py-3 text-left text-xs font-semibold text-purple-200 uppercase">Name</th>
+                          <th className="px-4 py-3 text-left text-xs font-semibold text-purple-200 uppercase">Volume</th>
+                          <th className="px-4 py-3 text-left text-xs font-semibold text-purple-200 uppercase">Fill %</th>
+                          <th className="px-4 py-3 text-left text-xs font-semibold text-purple-200 uppercase">Max Vol</th>
+                          <th className="px-4 py-3 text-left text-xs font-semibold text-purple-200 uppercase">Fill Rate</th>
+                          <th className="px-4 py-3 text-left text-xs font-semibold text-purple-200 uppercase">Location</th>
+                          <th className="px-4 py-3 text-left text-xs font-semibold text-purple-200 uppercase">Status</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-white/10">
+                        {cauldrons.map(cauldron => {
+                          const cauldronId = cauldron.id || cauldron.cauldronId || cauldron.cauldron_id;
+                          const levelData = levelsAtSelectedTime.find(l => 
+                            (l.cauldron_id === cauldronId || l.cauldronId === cauldronId || l.id === cauldronId)
+                          );
+                          const currentVolume = levelData?.level || levelData?.volume || 0;
+                          const maxVolume = cauldron.maxVolume || cauldron.max_volume || 1000;
+                          const fillPercentage = (currentVolume / maxVolume * 100);
+                          
+                          // Status logic: Low/OK/Warning/Critical
+                          let status, statusColor;
+                          if (fillPercentage < 20) {
+                            status = 'Low';
+                            statusColor = 'text-blue-400 bg-blue-500/20';
+                          } else if (fillPercentage < 70) {
+                            status = 'OK';
+                            statusColor = 'text-green-400 bg-green-500/20';
+                          } else if (fillPercentage < 90) {
+                            status = 'Warning';
+                            statusColor = 'text-yellow-400 bg-yellow-500/20';
+                          } else {
+                            status = 'Critical';
+                            statusColor = 'text-red-400 bg-red-500/20';
+                          }
+                          
+                          return (
+                            <tr key={cauldronId} className="hover:bg-white/5 transition">
+                              <td className="px-4 py-3 text-sm font-mono text-purple-200">{cauldronId}</td>
+                              <td className="px-4 py-3 text-sm font-medium text-white">{cauldron.name || cauldronId}</td>
+                              <td className="px-4 py-3 text-sm text-purple-200">{currentVolume.toFixed(1)} L</td>
+                              <td className="px-4 py-3">
+                                <div className="flex items-center gap-2">
+                                  <div className="flex-1 bg-white/10 rounded-full h-2 overflow-hidden">
+                                    <div 
+                                      className="bg-gradient-to-r from-purple-500 to-pink-500 h-full transition-all"
+                                      style={{ width: `${Math.min(fillPercentage, 100)}%` }}
+                                    />
+                                  </div>
+                                  <span className="text-xs text-purple-200 w-12">{fillPercentage.toFixed(0)}%</span>
+                                </div>
+                              </td>
+                              <td className="px-4 py-3 text-sm text-purple-200">{maxVolume} L</td>
+                              <td className="px-4 py-3 text-sm text-purple-200">{(cauldron.fillRate || cauldron.fill_rate || 0).toFixed(2)} L/min</td>
+                              <td className="px-4 py-3 text-sm text-purple-200">
+                                {(cauldron.latitude || cauldron.lat || 0).toFixed(4)}, {(cauldron.longitude || cauldron.lon || cauldron.long || 0).toFixed(4)}
+                              </td>
+                              <td className="px-4 py-3">
+                                <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${statusColor}`}>
+                                  {status}
+                                </span>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
               )}
-              
+
+              {activeTab === 'routes' && (
+                <div className="space-y-6">
+                  {/* Route Visualization */}
+                  <div className="bg-white/10 backdrop-blur-md rounded-lg shadow-2xl border border-white/20 p-3">
+                    <div className="mb-4">
+                      <h2 className="text-2xl font-bold text-white">🗺️ Optimized Courier Routes</h2>
+                      <p className="text-purple-200 text-sm mt-1">
+                        Visual representation of optimal witch routes to prevent cauldron overflow
+                      </p>
+                    </div>
+                    {optimizationResult ? (
+                      <RouteVisualization 
+                        routes={optimizationResult.routes}
+                        cauldrons={cauldrons}
+                        market={market}
+                        network={network}
+                        isAnimating={false}
+                        animationTime={0}
+                      />
+                    ) : (
+                      <div className="text-center py-12 text-purple-200">
+                        <p>Route optimization in progress...</p>
+                        <p className="text-sm mt-2">Ensure couriers, market, and network data are loaded</p>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Route Schedule */}
+                  <div>
+                    <RouteSchedule 
+                      optimizationResult={optimizationResult}
+                      cauldrons={cauldrons}
+                    />
+                  </div>
+                </div>
+              )}
+
               {activeTab === 'tickets' && (
                 <TicketTable tickets={tickets} />
               )}
@@ -243,35 +431,6 @@ function Dashboard() {
                 <ReconciliationPanel />
               )}
             </div>
-            {/* Time slider (if history available) - moved to bottom */}
-            {timestamps.length > 0 && (
-              <div className="mt-6 bg-white/5 p-4 rounded-lg border border-white/10">
-                <div className="flex items-center justify-between gap-4">
-                  <div className="flex-1">
-                    <label className="text-sm text-purple-200 block">Time</label>
-                    <div className="text-white font-semibold">
-                      {timeIndex !== null && timestamps[timeIndex]
-                        ? new Date(timestamps[timeIndex]).toLocaleString()
-                        : '—'}
-                    </div>
-                  </div>
-                  <div className="flex-1">
-                    <input
-                      type="range"
-                      min={0}
-                      max={Math.max(0, timestamps.length - 1)}
-                      value={timeIndex ?? 0}
-                      onChange={(e) => setTimeIndex(parseInt(e.target.value, 10))}
-                      className="w-full"
-                    />
-                    <div className="text-xs text-purple-300 mt-2 flex justify-between">
-                      <span>{timestamps.length ? new Date(timestamps[0]).toLocaleString() : ''}</span>
-                      <span>{timestamps.length ? new Date(timestamps[timestamps.length - 1]).toLocaleString() : ''}</span>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            )}
           </>
         )}
       </div>

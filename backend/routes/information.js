@@ -55,4 +55,19 @@ router.get('/network', async (req, res) => {
   }
 });
 
+// GET /api/information/couriers - Returns all available couriers/witches
+router.get('/couriers', async (req, res) => {
+  try {
+    const response = await fetch(`${HACKUTD_API}/api/Information/couriers`);
+    if (!response.ok) {
+      throw new Error(`HackUTD API error: ${response.status}`);
+    }
+    const couriers = await response.json();
+    res.json(couriers);
+  } catch (error) {
+    console.error('Error fetching couriers:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
 export default router;

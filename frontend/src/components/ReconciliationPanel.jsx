@@ -445,7 +445,9 @@ function ReconciliationPanel() {
                       <td className="px-4 py-3 text-sm text-purple-200">{(detail.fillRate || 0).toFixed(2)}</td>
                       <td className="px-4 py-3 text-sm text-purple-200">{detail.events.length}</td>
                       <td className="px-4 py-3">
-                        <span className={`text-sm font-semibold ${detail.ticketCount === 0 ? 'text-red-400' : 'text-green-400'}`}>
+                        <span className={`text-sm font-semibold ${
+                          detail.ticketCount === 0 && detail.events.length > 0 ? 'text-red-400' : 'text-green-400'
+                        }`}>
                           {detail.ticketCount}
                         </span>
                       </td>

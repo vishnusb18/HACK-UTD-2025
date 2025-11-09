@@ -1,81 +1,95 @@
-import { useState, useEffect } from 'react';
-import { Link } from 'react-router-dom';
-import MarketIcon from './Images/market2.png';
-import CauldronIcon from './Images/Cauldron.png';
+import { useState, useEffect, useRef, useMemo } from 'react';
 
 function MapView() {
-  const [market, setMarket] = useState(null);
   const [cauldrons, setCauldrons] = useState([]);
-  const [network, setNetwork] = useState([]);
+  const [market, setMarket] = useState(null);
   const [levels, setLevels] = useState([]);
+  const [network, setNetwork] = useState({ edges: [], description: '' });
+  const [hoveredNode, setHoveredNode] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  const [showRoute, setShowRoute] = useState(false);
-  const [sampleRoute, setSampleRoute] = useState(null);
-  const [hoveredCauldron, setHoveredCauldron] = useState(null);
-  const [cauldronPositions, setCauldronPositions] = useState([]);
-  const [zoom, setZoom] = useState(0.6); // Start zoomed out to show everything
-  const [pan, setPan] = useState({ x: 0, y: 0 });
-  const [hoveredEdge, setHoveredEdge] = useState(null);
+  const svgRef = useRef(null);
+  const containerRef = useRef(null);
+  
+  // Time slider state
+  const [allLevels, setAllLevels] = useState([]);
+  const [timeIndex, setTimeIndex] = useState(null);
+
+  // Map dimensions and projection
+  const mapWidth = 3200;
+  const mapHeight = 1200;
+  const padding = 220;
 
   useEffect(() => {
     fetchMapData();
   }, []);
 
-  // Keyboard shortcuts for zoom
-  useEffect(() => {
-    const handleKeyPress = (e) => {
-      if (e.key === '+' || e.key === '=') {
-        handleZoomIn();
-      } else if (e.key === '-' || e.key === '_') {
-        handleZoomOut();
-      }
-    };
-
-    window.addEventListener('keydown', handleKeyPress);
-    return () => window.removeEventListener('keydown', handleKeyPress);
-  }, [zoom]);
-
-  // Mouse wheel zoom (like Google Maps)
-  const handleWheel = (e) => {
-    e.preventDefault();
-    if (e.deltaY < 0) {
-      // Scroll up = Zoom in
-      handleZoomIn();
-    } else {
-      // Scroll down = Zoom out
-      handleZoomOut();
-    }
-  };
-
   const fetchMapData = async () => {
     try {
       setLoading(true);
-      const [marketRes, cauldronRes, networkRes, levelsRes] = await Promise.all([
-        fetch('/api/information/market'),
-        fetch('/api/information/cauldrons'),
-        fetch('/api/information/network'),
-        fetch('/api/levels/latest')
-      ]);
+      const errors = [];
 
-      if (!marketRes.ok || !cauldronRes.ok || !networkRes.ok || !levelsRes.ok) {
-        throw new Error('Failed to fetch map data');
+      // Fetch cauldrons
+      let cauldronData = [];
+      try {
+        const r = await fetch('/api/information/cauldrons');
+        if (!r.ok) throw new Error(`status ${r.status}`);
+        cauldronData = await r.json();
+      } catch (e) {
+        errors.push(`cauldrons: ${e.message}`);
       }
 
-      const marketData = await marketRes.json();
-      const cauldronData = await cauldronRes.json();
-      const networkData = await networkRes.json();
-      const levelsData = await levelsRes.json();
+      // Fetch market
+      let marketData = null;
+      try {
+        const r = await fetch('/api/information/market');
+        if (!r.ok) throw new Error(`status ${r.status}`);
+        marketData = await r.json();
+      } catch (e) {
+        errors.push(`market: ${e.message}`);
+      }
 
+      // Fetch latest levels
+      let latestLevels = [];
+      try {
+        const r = await fetch('/api/levels/latest');
+        if (!r.ok) throw new Error(`status ${r.status}`);
+        latestLevels = await r.json();
+      } catch (e) {
+        errors.push(`levels: ${e.message}`);
+      }
+
+      // Fetch historical levels for time slider
+      let historyLevels = [];
+      try {
+        const r = await fetch('/api/levels?start_date=0&end_date=2000000000');
+        if (!r.ok) throw new Error(`status ${r.status}`);
+        historyLevels = await r.json();
+      } catch (e) {
+        errors.push(`levels/history: ${e.message}`);
+      }
+
+      // Fetch network connections
+      let networkData = { edges: [], description: '' };
+      try {
+        const r = await fetch('/api/information/network');
+        if (!r.ok) throw new Error(`status ${r.status}`);
+        networkData = await r.json();
+      } catch (e) {
+        errors.push(`network: ${e.message}`);
+      }
+
+      setCauldrons(cauldronData || []);
       setMarket(marketData);
-      setCauldrons(cauldronData);
-      setNetwork(networkData.edges || []);
-      setLevels(levelsData);
-      setError(null);
+      setLevels(latestLevels || []);
+      setAllLevels(historyLevels || []);
+      setNetwork(networkData);
 
-      // Calculate circular positions for cauldrons - centered with good spacing
-      const positions = calculateCircularPositions(cauldronData, 800, 800, 500);
-      setCauldronPositions(positions);
+      if (errors.length) {
+        setError('Failed to fetch: ' + errors.join('; '));
+      } else {
+        setError(null);
+      }
     } catch (err) {
       setError(err.message);
       console.error('Error fetching map data:', err);
@@ -84,168 +98,333 @@ function MapView() {
     }
   };
 
-  // Calculate circular positions around the market
-  const calculateCircularPositions = (cauldrons, centerX, centerY, radius) => {
-    const angleStep = (2 * Math.PI) / cauldrons.length;
-    return cauldrons.map((cauldron, index) => {
-      const angle = angleStep * index - Math.PI / 2; // Start from top
-      const id = cauldron.id || cauldron.cauldronId || cauldron.cauldron_id;
-      return {
-        ...cauldron,
-        id: id,
-        x: centerX + radius * Math.cos(angle),
-        y: centerY + radius * Math.sin(angle)
-      };
-    });
-  };
-
-  // Get fill percentage for a cauldron
-  const getCauldronFillPercentage = (cauldronId) => {
-    const level = levels.find(l => 
-      (l.cauldronId || l.cauldron_id || l.tankId) === cauldronId
-    );
-    if (!level) return 0;
-    
-    const cauldron = cauldrons.find(c => 
-      (c.id || c.cauldronId || c.cauldron_id) === cauldronId
-    );
-    if (!cauldron) return 0;
-    
-    const maxVolume = cauldron.maxVolume || cauldron.max_volume || 1000;
-    const currentVolume = level.volume || level.level || 0;
-    return (currentVolume / maxVolume) * 100;
-  };
-
-  // Get color based on fill percentage
-  const getCauldronColor = (fillPercentage) => {
-    if (fillPercentage > 90) return '#ef4444'; // red
-    if (fillPercentage > 70) return '#f59e0b'; // yellow
-    if (fillPercentage > 50) return '#3b82f6'; // blue
-    return '#10b981'; // green
-  };
-
-  // Generate unique color for each cauldron's connections
-  const getCauldronConnectionColor = (cauldronId) => {
-    const colors = [
-      '#ef4444', // red
-      '#f59e0b', // orange
-      '#eab308', // yellow
-      '#84cc16', // lime
-      '#10b981', // green
-      '#06b6d4', // cyan
-      '#3b82f6', // blue
-      '#6366f1', // indigo
-      '#8b5cf6', // violet
-      '#a855f7', // purple
-      '#ec4899', // pink
-      '#f43f5e', // rose
-    ];
-    
-    // Hash the cauldron ID to get a consistent color
-    const index = cauldronPositions.findIndex(c => c.id === cauldronId);
-    return colors[index % colors.length];
-  };
-
-  // Calculate sample route (Market → most full cauldron → Market)
-  const calculateSampleRoute = () => {
-    if (!market || cauldronPositions.length === 0) return null;
-
-    let mostFullCauldron = null;
-    let maxFill = 0;
-
-    cauldronPositions.forEach(cauldron => {
-      const fillPercent = getCauldronFillPercentage(cauldron.id);
-      if (fillPercent > maxFill) {
-        maxFill = fillPercent;
-        mostFullCauldron = cauldron;
+  // Derive sorted unique minute timestamps from allLevels
+  const timestamps = useMemo(() => {
+    if (!allLevels || allLevels.length === 0) return [];
+    const uniqueMs = new Set();
+    allLevels.forEach(r => {
+      const ts = r.timestamp || r.time;
+      if (ts) {
+        const d = new Date(ts);
+        d.setSeconds(0, 0);
+        uniqueMs.add(d.getTime());
       }
     });
+    return Array.from(uniqueMs).sort((a, b) => a - b);
+  }, [allLevels]);
 
-    if (!mostFullCauldron) return null;
+  // Default timeIndex to latest minute
+  useEffect(() => {
+    if (timestamps.length > 0 && timeIndex === null) {
+      setTimeIndex(timestamps.length - 1);
+    }
+  }, [timestamps, timeIndex]);
 
-    const toCapuldronEdge = network.find(e => 
-      (e.from === 'market_001' && e.to === mostFullCauldron.id) ||
-      (e.to === 'market_001' && e.from === mostFullCauldron.id)
-    );
+  // Compute snapshot of levels for the selected minute
+  const levelsAtSelectedTime = useMemo(() => {
+    if (timeIndex === null || timestamps.length === 0) return levels;
+    const selectedMs = timestamps[timeIndex];
+    const snapshot = allLevels.filter(r => {
+      const ts = r.timestamp || r.time;
+      if (!ts) return false;
+      const d = new Date(ts);
+      d.setSeconds(0, 0);
+      return d.getTime() === selectedMs;
+    });
+    return snapshot.length > 0 ? snapshot : levels;
+  }, [allLevels, timestamps, timeIndex, levels]);
 
-    const totalTravelMin = toCapuldronEdge ? toCapuldronEdge.travel_time_minutes * 2 : 0;
-    const totalMin = totalTravelMin + 15;
+  // Calculate spread-out coordinates using a circular/grid layout for better visibility
+  const getProjectedCoordinates = () => {
+    if (cauldrons.length === 0) return { cauldrons: [], market: null };
+
+    // Use an elliptical layout with market in center (wider horizontally)
+    const centerX = mapWidth / 2;
+    const centerY = mapHeight / 2;
+    
+    // Calculate radius based on number of cauldrons to ensure spacing
+    const numCauldrons = cauldrons.length;
+    const minSpacing = 400; // Increased spacing for bigger elements
+    const radiusX = Math.max(950, (numCauldrons * minSpacing) / (2 * Math.PI)); // Horizontal radius
+    const radiusY = radiusX * 0.65; // Vertical radius (65% of horizontal for ellipse)
+
+    // Position market in the center
+    const projectedMarket = market ? {
+      ...market,
+      x: centerX,
+      y: centerY,
+    } : null;
+
+    // Position cauldrons in an ellipse around the market
+    const projectedCauldrons = cauldrons.map((cauldron, index) => {
+      const angle = (index / numCauldrons) * 2 * Math.PI;
+      const x = centerX + radiusX * Math.cos(angle);
+      const y = centerY + radiusY * Math.sin(angle);
+      
+      return {
+        ...cauldron,
+        x,
+        y,
+      };
+    });
 
     return {
-      cauldron: mostFullCauldron,
-      totalMin,
-      travelMin: totalTravelMin
+      cauldrons: projectedCauldrons,
+      market: projectedMarket,
     };
   };
 
-  useEffect(() => {
-    if (showRoute) {
-      setSampleRoute(calculateSampleRoute());
-    } else {
-      setSampleRoute(null);
+  const { cauldrons: projectedCauldrons, market: projectedMarket } = getProjectedCoordinates();
+
+  // Extract cauldron number from ID (e.g., "cauldron_001" -> "1")
+  const getCauldronNumber = (cauldronId) => {
+    const match = cauldronId?.match(/\d+/);
+    return match ? parseInt(match[0], 10).toString() : '?';
+  };
+
+  // Get level for a cauldron
+  const getLevelForCauldron = (cauldronId) => {
+    const level = levelsAtSelectedTime.find(l => 
+      l.cauldron_id === cauldronId || 
+      l.cauldronId === cauldronId || 
+      l.id === cauldronId
+    );
+    return level?.level ?? level?.volume ?? 0;
+  };
+
+  // Calculate fill percentage
+  const getFillPercentage = (cauldron) => {
+    const currentLevel = getLevelForCauldron(cauldron.id);
+    const maxVolume = cauldron.max_volume || cauldron.maxVolume || 100;
+    return (currentLevel / maxVolume) * 100;
+  };
+
+  // Get color based on fill percentage
+  const getFillColor = (percentage) => {
+    if (percentage >= 90) return '#ef4444'; // red - critical
+    if (percentage >= 70) return '#f59e0b'; // orange - warning
+    if (percentage >= 20) return '#10b981'; // green - ok
+    return '#6366f1'; // purple - low
+  };
+
+  // Draw cauldron shape
+  const CauldronIcon = ({ cauldron, x, y, size, fillPercentage, isHovered }) => {
+    const scale = isHovered ? 1.2 : 1;
+    const adjustedSize = size * 3.8; // Significantly bigger cauldrons
+    const fillColor = getFillColor(fillPercentage);
+    const cauldronNumber = getCauldronNumber(cauldron.id);
+    
+    return (
+      <g transform={`translate(${x}, ${y}) scale(${scale})`}>
+        {/* Smaller hover background circle */}
+        <circle
+          cx="0"
+          cy="0"
+          r={adjustedSize * 1.5}
+          fill="transparent"
+          stroke="none"
+        />
+        {/* Cauldron body */}
+        <path
+          d={`M ${-adjustedSize} ${adjustedSize * 0.3} 
+              Q ${-adjustedSize} ${adjustedSize * 1.2} 0 ${adjustedSize * 1.3}
+              Q ${adjustedSize} ${adjustedSize * 1.2} ${adjustedSize} ${adjustedSize * 0.3}
+              L ${adjustedSize * 0.8} ${-adjustedSize * 0.5}
+              Q ${adjustedSize * 0.8} ${-adjustedSize * 0.8} ${adjustedSize * 0.5} ${-adjustedSize * 0.9}
+              L ${-adjustedSize * 0.5} ${-adjustedSize * 0.9}
+              Q ${-adjustedSize * 0.8} ${-adjustedSize * 0.8} ${-adjustedSize * 0.8} ${-adjustedSize * 0.5}
+              Z`}
+          fill={fillColor}
+          stroke="#1f2937"
+          strokeWidth="4"
+          opacity="0.9"
+        />
+        {/* Cauldron rim */}
+        <ellipse
+          cx="0"
+          cy={-adjustedSize * 0.5}
+          rx={adjustedSize * 0.9}
+          ry={adjustedSize * 0.25}
+          fill={fillColor}
+          stroke="#1f2937"
+          strokeWidth="4"
+          opacity="0.95"
+        />
+        {/* Handle left */}
+        <path
+          d={`M ${-adjustedSize * 0.9} ${-adjustedSize * 0.3} Q ${-adjustedSize * 1.3} ${-adjustedSize * 0.2} ${-adjustedSize * 1.3} ${adjustedSize * 0.2}`}
+          fill="none"
+          stroke="#4b5563"
+          strokeWidth="6"
+        />
+        {/* Handle right */}
+        <path
+          d={`M ${adjustedSize * 0.9} ${-adjustedSize * 0.3} Q ${adjustedSize * 1.3} ${-adjustedSize * 0.2} ${adjustedSize * 1.3} ${adjustedSize * 0.2}`}
+          fill="none"
+          stroke="#4b5563"
+          strokeWidth="6"
+        />
+        {/* Fill level indicator */}
+        <rect
+          x={-adjustedSize * 0.6}
+          y={-adjustedSize * 0.4}
+          width={adjustedSize * 1.2}
+          height={adjustedSize * 0.18}
+          fill="white"
+          opacity="0.3"
+          rx="3"
+        />
+        <rect
+          x={-adjustedSize * 0.6}
+          y={-adjustedSize * 0.4}
+          width={adjustedSize * 1.2 * (fillPercentage / 100)}
+          height={adjustedSize * 0.18}
+          fill="white"
+          opacity="0.7"
+          rx="3"
+        />
+        {/* Cauldron number */}
+        <text
+          x="0"
+          y={adjustedSize * 0.5}
+          textAnchor="middle"
+          fill="#fff"
+          fontSize="42"
+          fontWeight="bold"
+          stroke="#1f2937"
+          strokeWidth="1.5"
+        >
+          {cauldronNumber}
+        </text>
+      </g>
+    );
+  };
+
+  // Draw market icon
+  const MarketIcon = ({ x, y, size, isHovered }) => {
+    const scale = isHovered ? 1.2 : 1;
+    const adjustedSize = size * 3.8; // Significantly bigger market
+    
+    return (
+      <g transform={`translate(${x}, ${y}) scale(${scale})`}>
+        {/* Smaller hover background circle */}
+        <circle
+          cx="0"
+          cy="0"
+          r={adjustedSize * 2}
+          fill="transparent"
+          stroke="none"
+        />
+        {/* Market building */}
+        <rect
+          x={-adjustedSize}
+          y={-adjustedSize * 0.5}
+          width={adjustedSize * 2}
+          height={adjustedSize * 1.5}
+          fill="#8b5cf6"
+          stroke="#1f2937"
+          strokeWidth="4.5"
+          rx="8"
+        />
+        {/* Roof */}
+        <path
+          d={`M ${-adjustedSize * 1.2} ${-adjustedSize * 0.5} L 0 ${-adjustedSize * 1.3} L ${adjustedSize * 1.2} ${-adjustedSize * 0.5} Z`}
+          fill="#7c3aed"
+          stroke="#1f2937"
+          strokeWidth="4.5"
+        />
+        {/* Door */}
+        <rect
+          x={-adjustedSize * 0.3}
+          y={adjustedSize * 0.3}
+          width={adjustedSize * 0.6}
+          height={adjustedSize * 0.7}
+          fill="#6d28d9"
+          stroke="#1f2937"
+          strokeWidth="3"
+          rx="6"
+        />
+        {/* Windows */}
+        <rect
+          x={-adjustedSize * 0.7}
+          y={-adjustedSize * 0.2}
+          width={adjustedSize * 0.4}
+          height={adjustedSize * 0.4}
+          fill="#fbbf24"
+          stroke="#1f2937"
+          strokeWidth="2.5"
+        />
+        <rect
+          x={adjustedSize * 0.3}
+          y={-adjustedSize * 0.2}
+          width={adjustedSize * 0.4}
+          height={adjustedSize * 0.4}
+          fill="#fbbf24"
+          stroke="#1f2937"
+          strokeWidth="2.5"
+        />
+        {/* Market sign */}
+        <text
+          x="0"
+          y={adjustedSize * 2.2}
+          textAnchor="middle"
+          fill="#fff"
+          fontSize="48"
+          fontWeight="bold"
+        >
+          Market
+        </text>
+      </g>
+    );
+  };
+
+  // Get node by ID
+  const getNodeById = (nodeId) => {
+    if (projectedMarket && (projectedMarket.id === nodeId)) {
+      return projectedMarket;
     }
-  }, [showRoute, cauldronPositions, levels, network, market]);
-
-  // Handle zoom controls
-  const handleZoomIn = () => {
-    setZoom(prev => Math.min(prev + 0.2, 3)); // Max zoom 3x
+    return projectedCauldrons.find(c => c.id === nodeId);
   };
 
-  const handleZoomOut = () => {
-    setZoom(prev => Math.max(prev - 0.2, 0.5)); // Min zoom 0.5x
-  };
+  // Render network connections
+  const renderConnections = () => {
+    if (!network.edges || network.edges.length === 0) return null;
 
-  const handleResetView = () => {
-    setZoom(0.6); // Reset to fit-all view
-    setPan({ x: 0, y: 0 });
-  };
-
-  // Render connection lines between nodes
-  const renderEdges = () => {
-    const marketX = 800;
-    const marketY = 800;
-
-    return network.map((edge, idx) => {
-      const fromNode = edge.from === 'market_001' 
-        ? { x: marketX, y: marketY, id: 'market_001' }
-        : cauldronPositions.find(c => c.id === edge.from);
-      
-      const toNode = edge.to === 'market_001' 
-        ? { x: marketX, y: marketY, id: 'market_001' }
-        : cauldronPositions.find(c => c.id === edge.to);
+    return network.edges.map((edge, idx) => {
+      const fromNode = getNodeById(edge.from);
+      const toNode = getNodeById(edge.to);
 
       if (!fromNode || !toNode) return null;
 
-      const isMarketConnection = edge.from === 'market_001' || edge.to === 'market_001';
-      const isSampleRoute = sampleRoute && (
-        (edge.from === 'market_001' && edge.to === sampleRoute.cauldron.id) ||
-        (edge.to === 'market_001' && edge.from === sampleRoute.cauldron.id)
-      );
-      const isHovered = hoveredEdge === idx;
-
-      // Determine the cauldron ID for this edge (not market)
-      const cauldronId = edge.from === 'market_001' ? edge.to : edge.from;
-      
-      // Get unique color for this cauldron's connections
-      const edgeColor = isSampleRoute ? '#f59e0b' : getCauldronConnectionColor(cauldronId);
-
-      // Calculate midpoint for travel time label
+      const edgeId = `edge-${idx}`;
       const midX = (fromNode.x + toNode.x) / 2;
       const midY = (fromNode.y + toNode.y) / 2;
 
       return (
-        <g key={`edge-${idx}`}>
-          {/* Invisible wider line for easier hover detection */}
+        <g key={edgeId}>
+          {/* Invisible wider line for easier hovering */}
           <line
             x1={fromNode.x}
             y1={fromNode.y}
             x2={toNode.x}
             y2={toNode.y}
             stroke="transparent"
-            strokeWidth={15}
+            strokeWidth="20"
             style={{ cursor: 'pointer' }}
-            onMouseEnter={() => setHoveredEdge(idx)}
-            onMouseLeave={() => setHoveredEdge(null)}
+            onMouseEnter={() => {
+              setHoveredNode({ 
+                id: edgeId, 
+                isEdge: true, 
+                x: midX, 
+                y: midY,
+                travelTime: edge.travel_time_minutes,
+                from: edge.from,
+                to: edge.to
+              });
+            }}
+            onMouseLeave={() => {
+              if (hoveredNode?.isEdge) setHoveredNode(null);
+            }}
           />
           {/* Visible line */}
           <line
@@ -253,350 +432,287 @@ function MapView() {
             y1={fromNode.y}
             x2={toNode.x}
             y2={toNode.y}
-            stroke={edgeColor}
-            strokeWidth={isHovered ? 4 : (isSampleRoute ? 4 : 2)}
-            strokeOpacity={isHovered ? 1 : (isSampleRoute ? 0.9 : 0.6)}
+            stroke="#6366f1"
+            strokeWidth={hoveredNode?.id === edgeId ? "8" : "6"}
+            strokeOpacity={hoveredNode?.id === edgeId ? "0.8" : "0.5"}
             style={{ pointerEvents: 'none' }}
           />
-          {/* Travel time label - only show on hover */}
-          {isHovered && (
-            <g style={{ pointerEvents: 'none' }}>
-              <rect
-                x={midX - 30}
-                y={midY - 15}
-                width={60}
-                height={30}
-                fill="rgba(0, 0, 0, 0.85)"
-                rx={6}
-              />
-              <text
-                x={midX}
-                y={midY + 6}
-                textAnchor="middle"
-                fill="white"
-                fontSize="14"
-                fontWeight="700"
-              >
-                {edge.travel_time_minutes}min
-              </text>
-            </g>
-          )}
         </g>
       );
     });
-  };
-
-  // Render market node
-  const renderMarket = () => {
-    const marketX = 800;
-    const marketY = 800;
-
-    return (
-      <g>
-        {/* Market icon - larger, no circle */}
-        <image
-          href={MarketIcon}
-          x={marketX - 70}
-          y={marketY - 70}
-          width={140}
-          height={140}
-          style={{ pointerEvents: 'none' }}
-        />
-        {/* Market label */}
-        <text
-          x={marketX}
-          y={marketY + 90}
-          textAnchor="middle"
-          fill="white"
-          fontSize="20"
-          fontWeight="bold"
-        >
-          MARKET
-        </text>
-      </g>
-    );
-  };
-
-  // Render individual cauldron
-  const renderCauldron = (cauldron) => {
-    const fillPercentage = getCauldronFillPercentage(cauldron.id);
-    const color = getCauldronColor(fillPercentage);
-    const name = cauldron.name || cauldron.cauldronName || cauldron.id;
-    const shortId = cauldron.id.replace('cauldron_', 'C');
-
-    const isSampleRoute = sampleRoute && sampleRoute.cauldron.id === cauldron.id;
-
-    return (
-      <g
-        key={cauldron.id}
-        onMouseEnter={() => setHoveredCauldron(cauldron)}
-        onMouseLeave={() => setHoveredCauldron(null)}
-        style={{ cursor: 'pointer' }}
-      >
-        {/* Glow effect for hovered or sample route cauldron */}
-        {(hoveredCauldron?.id === cauldron.id || isSampleRoute) && (
-          <circle
-            cx={cauldron.x}
-            cy={cauldron.y}
-            r={70}
-            fill={isSampleRoute ? '#f59e0b' : color}
-            opacity={0.3}
-          />
-        )}
-        
-        {/* Cauldron icon - larger, no circle background */}
-        <image
-          href={CauldronIcon}
-          x={cauldron.x - 60}
-          y={cauldron.y - 60}
-          width={120}
-          height={120}
-          style={{ pointerEvents: 'none' }}
-        />
-        
-        {/* Status indicator ring around the image */}
-        <circle
-          cx={cauldron.x}
-          cy={cauldron.y}
-          r={65}
-          fill="none"
-          stroke={color}
-          strokeWidth={5}
-          opacity={0.8}
-        />
-        
-        {/* Cauldron ID label */}
-        <text
-          x={cauldron.x}
-          y={cauldron.y + 85}
-          textAnchor="middle"
-          fill="white"
-          fontSize="16"
-          fontWeight="bold"
-        >
-          {shortId}
-        </text>
-      </g>
-    );
-  };
-
-  // Render hover tooltip with all cauldron information
+  };  // Render hover tooltip
   const renderTooltip = () => {
-    if (!hoveredCauldron) return null;
+    if (!hoveredNode || !hoveredNode.isEdge) return null;
+    if (!svgRef.current || !containerRef.current) return null;
 
-    const fillPercentage = getCauldronFillPercentage(hoveredCauldron.id);
-    const level = levels.find(l => 
-      (l.cauldronId || l.cauldron_id || l.tankId) === hoveredCauldron.id
-    );
-    const currentVolume = level ? (level.volume || level.level || 0) : 0;
+    // Get the SVG element's bounding rectangle
+    const svgRect = svgRef.current.getBoundingClientRect();
+    const containerRect = containerRef.current.getBoundingClientRect();
+    
+    // Calculate the scale factor between viewBox and actual rendered size
+    const scaleX = svgRect.width / mapWidth;
+    const scaleY = svgRect.height / mapHeight;
+    
+    // Convert SVG coordinates to screen coordinates
+    const screenX = containerRect.left + (hoveredNode.x * scaleX);
+    const screenY = containerRect.top + (hoveredNode.y * scaleY);
 
-    // Position tooltip near the cauldron
-    const tooltipX = hoveredCauldron.x > 800 ? hoveredCauldron.x - 250 : hoveredCauldron.x + 80;
-    const tooltipY = hoveredCauldron.y - 100;
-
+    // Only show tooltip for edges now
     return (
-      <g style={{ pointerEvents: 'none' }}>
-        {/* Tooltip background */}
-        <rect
-          x={tooltipX}
-          y={tooltipY}
-          width={230}
-          height={200}
-          fill="white"
-          stroke="#9333EA"
-          strokeWidth={2}
-          rx={8}
-          filter="drop-shadow(0 4px 6px rgba(0, 0, 0, 0.3))"
-        />
-        
-        {/* Tooltip content */}
-        <text x={tooltipX + 15} y={tooltipY + 25} fontSize="16" fontWeight="bold" fill="#581c87">
-          {hoveredCauldron.name || hoveredCauldron.cauldronName || hoveredCauldron.id}
-        </text>
-        <text x={tooltipX + 15} y={tooltipY + 45} fontSize="11" fill="#6b7280">
-          ID: {hoveredCauldron.id}
-        </text>
-        
-        <text x={tooltipX + 15} y={tooltipY + 70} fontSize="12" fill="#374151">
-          <tspan fontWeight="600">Fill Level:</tspan> {fillPercentage.toFixed(1)}%
-        </text>
-        <text x={tooltipX + 15} y={tooltipY + 90} fontSize="12" fill="#374151">
-          <tspan fontWeight="600">Current:</tspan> {currentVolume.toFixed(1)} L
-        </text>
-        <text x={tooltipX + 15} y={tooltipY + 110} fontSize="12" fill="#374151">
-          <tspan fontWeight="600">Max Volume:</tspan> {(hoveredCauldron.maxVolume || hoveredCauldron.max_volume || 0).toFixed(1)} L
-        </text>
-        <text x={tooltipX + 15} y={tooltipY + 130} fontSize="12" fill="#374151">
-          <tspan fontWeight="600">Fill Rate:</tspan> {(hoveredCauldron.fillRate || hoveredCauldron.fill_rate || 0).toFixed(2)} L/min
-        </text>
-        <text x={tooltipX + 15} y={tooltipY + 150} fontSize="12" fill="#374151">
-          <tspan fontWeight="600">Location:</tspan> 
-        </text>
-        <text x={tooltipX + 15} y={tooltipY + 168} fontSize="10" fill="#6b7280">
-          {(hoveredCauldron.latitude || hoveredCauldron.lat || 0).toFixed(4)}°, {(hoveredCauldron.longitude || hoveredCauldron.lon || hoveredCauldron.long || 0).toFixed(4)}°
-        </text>
-        
-        {/* View Details hint */}
-        <text x={tooltipX + 15} y={tooltipY + 188} fontSize="10" fill="#9333EA" fontStyle="italic">
-          Click for full details →
-        </text>
-      </g>
-    );
-  };
-
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center h-screen bg-gradient-to-br from-purple-900 via-purple-800 to-indigo-900">
-        <div className="text-center">
-          <div className="inline-block animate-spin rounded-full h-16 w-16 border-4 border-purple-300 border-t-white"></div>
-          <p className="text-white mt-4 text-lg">Loading potion network map...</p>
+      <div
+        className="fixed bg-gray-900/95 text-white p-4 rounded-lg shadow-xl border border-purple-500/50 pointer-events-none z-50"
+        style={{
+          left: `${screenX}px`,
+          top: `${screenY - 60}px`,
+          transform: 'translate(-50%, -100%)',
+          minWidth: '200px',
+        }}
+      >
+        <div className="text-lg font-semibold text-center">
+          ⏱️ Travel Time: <span className="text-purple-300">{hoveredNode.travelTime} minutes</span>
+        </div>
+        <div className="text-sm text-gray-400 text-center mt-1">
+          {getCauldronNumber(hoveredNode.from)} ↔ {hoveredNode.to === market?.id ? 'Market' : getCauldronNumber(hoveredNode.to)}
         </div>
       </div>
     );
-  }
+  };
 
-  if (error) {
+  // Render cauldron info label
+  const CauldronLabel = ({ cauldron, x, y }) => {
+    const fillPercentage = getFillPercentage(cauldron);
+    const currentLevel = getLevelForCauldron(cauldron.id);
+    const cauldronNumber = getCauldronNumber(cauldron.id);
+    const maxVolume = cauldron.max_volume || cauldron.maxVolume || 0;
+    // Remove "Cauldron" prefix from name if it exists
+    let cauldronName = cauldron.name || `Cauldron ${cauldronNumber}`;
+    cauldronName = cauldronName.replace(/^Cauldron\s*/i, '');
+    
+    // Calculate position for label (to the side of the cauldron)
+    const angle = Math.atan2(y - mapHeight / 2, x - mapWidth / 2);
+    const labelDistance = 190;
+    const labelX = x + Math.cos(angle) * labelDistance;
+    const labelY = y + Math.sin(angle) * labelDistance;
+    
+    // Determine text anchor based on position
+    // Special cases for cauldron 4 and 10 - center them
+    let textAnchor = labelX > x ? 'start' : 'end';
+    let adjustedLabelX = labelX;
+    let adjustedLabelY = labelY;
+    
+    if (cauldronNumber === '4' || cauldronNumber === '10') {
+      textAnchor = 'middle';
+      adjustedLabelX = x;
+      adjustedLabelY = y < mapHeight / 2 ? y - 180 : y + 180;
+    }
+    
+    const boxWidth = 410;
+    const boxHeight = 170;
+    const boxX = textAnchor === 'middle' ? adjustedLabelX - boxWidth / 2 : 
+                 textAnchor === 'start' ? adjustedLabelX : adjustedLabelX - boxWidth;
+    
     return (
-      <div className="flex items-center justify-center h-screen bg-gradient-to-br from-purple-900 via-purple-800 to-indigo-900">
-        <div className="bg-red-500/20 border border-red-500 text-red-200 p-6 rounded-lg max-w-md">
-          <p className="font-semibold text-lg mb-2">⚠️ Error Loading Map</p>
-          <p>{error}</p>
+      <g>
+        {/* Background box */}
+        <rect
+          x={boxX}
+          y={adjustedLabelY - 78}
+          width={boxWidth}
+          height={boxHeight - 10}
+          fill="rgba(17, 24, 39, 0.95)"
+          stroke="#6366f1"
+          strokeWidth="3"
+          rx="12"
+        />
+        
+        {/* Cauldron name */}
+        <text
+          x={textAnchor === 'middle' ? adjustedLabelX : boxX + boxWidth / 2}
+          y={adjustedLabelY - 35}
+          textAnchor="middle"
+          fill="#ffffff"
+          fontSize="32"
+          fontWeight="bold"
+        >
+          {cauldronName}
+        </text>
+        
+        {/* Fill percentage */}
+        <text
+          x={textAnchor === 'middle' ? adjustedLabelX : boxX + boxWidth / 2}
+          y={adjustedLabelY + 8}
+          textAnchor="middle"
+          fill={getFillColor(fillPercentage)}
+          fontSize="36"
+          fontWeight="bold"
+        >
+          {fillPercentage.toFixed(1)}% Full
+        </text>
+        
+        {/* Volume info */}
+        <text
+          x={textAnchor === 'middle' ? adjustedLabelX : boxX + boxWidth / 2}
+          y={adjustedLabelY + 48}
+          textAnchor="middle"
+          fill="#d1d5db"
+          fontSize="32"
+        >
+          {currentLevel.toFixed(1)}L / {maxVolume}L
+        </text>
+      </g>
+    );
+  };
+
+  return (
+    <div className="flex flex-col h-[750px]">
+      {/* Error Display */}
+      {error && (
+        <div className="bg-red-500 text-white p-3 rounded-lg mb-2 shadow-lg flex-shrink-0">
+          <p className="font-semibold text-sm">⚠️ Error: {error}</p>
           <button 
             onClick={fetchMapData}
-            className="mt-4 px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded transition"
+            className="mt-2 px-3 py-1 bg-red-700 hover:bg-red-600 rounded transition text-sm"
           >
             Retry
           </button>
         </div>
-      </div>
-    );
-  }
+      )}
 
-  return (
-    <div className="h-screen flex flex-col bg-gradient-to-br from-purple-900 via-purple-800 to-indigo-900 overflow-hidden">
-      {/* Header */}
-      <div className="p-4 bg-white/10 backdrop-blur-md border-b border-white/20">
-        <div className="max-w-7xl mx-auto flex justify-between items-center">
+      {/* Loading State */}
+      {loading && (
+        <div className="text-center py-12 flex-1 flex items-center justify-center">
           <div>
-            <h1 className="text-2xl font-bold text-white flex items-center gap-2">
-              🗺️ Potion Network Map
-            </h1>
-            <p className="text-purple-200 text-sm">Cauldron locations and broomstick routes</p>
-          </div>
-          <div className="flex items-center gap-4">
-            <label className="flex items-center gap-2 text-white cursor-pointer">
-              <input
-                type="checkbox"
-                checked={showRoute}
-                onChange={(e) => setShowRoute(e.target.checked)}
-                className="w-5 h-5 rounded"
-              />
-              <span className="text-sm font-semibold">Show Sample Route</span>
-            </label>
-            <Link
-              to="/"
-              className="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded font-semibold transition"
-            >
-              ← Back to Dashboard
-            </Link>
+            <div className="inline-block animate-spin rounded-full h-12 w-12 border-4 border-purple-300 border-t-white"></div>
+            <p className="text-white mt-4">Loading map data...</p>
           </div>
         </div>
-      </div>
+      )}
 
-      {/* Map Canvas */}
-      <div className="flex-1 p-4 relative overflow-hidden">
-        <div 
-          className="h-full w-full rounded-lg shadow-2xl border-4 border-white/20 flex items-center justify-center" 
-          style={{ background: 'linear-gradient(to bottom right, #581c87 0%, #6b21a8 50%, #312e81 100%)' }}
-          onWheel={handleWheel}
-        >
-          {/* Zoom Controls - Top Left */}
-          <div className="absolute top-4 left-4 z-10 bg-white/90 backdrop-blur-md rounded-lg shadow-lg p-3">
-            <div className="text-purple-900 font-bold text-sm mb-2 text-center">Zoom</div>
-            <div className="flex flex-col gap-2">
-              <button
-                onClick={handleZoomIn}
-                className="w-10 h-10 bg-purple-600 hover:bg-purple-700 text-white rounded-lg font-bold text-xl flex items-center justify-center transition"
-                title="Zoom In (+)"
-              >
-                +
-              </button>
-              <button
-                onClick={handleZoomOut}
-                className="w-10 h-10 bg-purple-600 hover:bg-purple-700 text-white rounded-lg font-bold text-xl flex items-center justify-center transition"
-                title="Zoom Out (-)"
-              >
-                −
-              </button>
-              <button
-                onClick={handleResetView}
-                className="w-10 h-10 bg-purple-600 hover:bg-purple-700 text-white rounded-lg font-bold text-sm flex items-center justify-center transition"
-                title="Reset View"
-              >
-                ⟲
-              </button>
+      {/* Map Container */}
+      {!loading && !error && (
+        <div className="bg-white/10 backdrop-blur-md rounded-lg shadow-2xl border border-white/20 p-3 relative flex-1 flex flex-col overflow-hidden min-h-0">
+            {/* Legend */}
+            <div className="absolute bottom-3 right-3 bg-gray-900/90 p-3 rounded-lg shadow-lg z-10">
+              <div className="text-white font-semibold mb-1.5 text-sm">Legend</div>
+              <div className="space-y-1 text-xs">
+                <div className="flex items-center gap-2">
+                  <div className="w-3 h-3 rounded" style={{ backgroundColor: '#6366f1' }}></div>
+                  <span className="text-gray-300">Low (&lt;20%)</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <div className="w-3 h-3 rounded" style={{ backgroundColor: '#10b981' }}></div>
+                  <span className="text-gray-300">OK (20-70%)</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <div className="w-3 h-3 rounded" style={{ backgroundColor: '#f59e0b' }}></div>
+                  <span className="text-gray-300">Warning (70-90%)</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <div className="w-3 h-3 rounded" style={{ backgroundColor: '#ef4444' }}></div>
+                  <span className="text-gray-300">Critical (&gt;90%)</span>
+                </div>
+              </div>
             </div>
-            <div className="text-purple-700 text-xs mt-2 text-center">
-              Press +/-
+
+            {/* Time Slider */}
+            {timestamps.length > 0 && (
+              <div className="mb-2 flex-shrink-0 bg-gray-900/70 p-3 rounded-lg">
+                <div className="flex items-center gap-4">
+                  <span className="text-white font-semibold text-sm whitespace-nowrap">Time:</span>
+                  <input
+                    type="range"
+                    min="0"
+                    max={timestamps.length - 1}
+                    value={timeIndex ?? timestamps.length - 1}
+                    onChange={(e) => setTimeIndex(parseInt(e.target.value, 10))}
+                    className="flex-1 h-2 bg-purple-600 rounded-lg appearance-none cursor-pointer accent-purple-500"
+                  />
+                  <span className="text-purple-200 font-mono text-sm whitespace-nowrap">
+                    {timeIndex !== null && timestamps[timeIndex]
+                      ? new Date(timestamps[timeIndex]).toLocaleString()
+                      : 'Latest'}
+                  </span>
+                </div>
+              </div>
+            )}
+
+            {/* SVG Map - Centered and fills available space */}
+            <div ref={containerRef} className="relative bg-slate-900/50 rounded-lg flex-1 flex items-center justify-center overflow-hidden min-h-0">
+              <svg
+                ref={svgRef}
+                width={mapWidth}
+                height={mapHeight}
+                className="max-w-full max-h-full w-full h-full"
+                viewBox={`0 0 ${mapWidth} ${mapHeight}`}
+                preserveAspectRatio="xMidYMid meet"
+              >
+                {/* Grid background */}
+                <defs>
+                  <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse">
+                    <path d="M 40 0 L 0 0 0 40" fill="none" stroke="#ffffff" strokeWidth="0.5" opacity="0.1"/>
+                  </pattern>
+                </defs>
+                <rect width={mapWidth} height={mapHeight} fill="url(#grid)" />
+
+                {/* Render connections */}
+                <g>
+                  {renderConnections()}
+                </g>
+
+                {/* Render cauldrons */}
+                <g>
+                  {projectedCauldrons.map((cauldron) => {
+                    const fillPercentage = getFillPercentage(cauldron);
+                    return (
+                      <g
+                        key={cauldron.id}
+                        onMouseEnter={() => setHoveredNode(cauldron)}
+                        onMouseLeave={() => setHoveredNode(null)}
+                        style={{ cursor: 'pointer' }}
+                      >
+                        <CauldronIcon
+                          cauldron={cauldron}
+                          x={cauldron.x}
+                          y={cauldron.y}
+                          size={20}
+                          fillPercentage={fillPercentage}
+                          isHovered={hoveredNode?.id === cauldron.id && !hoveredNode?.isEdge}
+                        />
+                      </g>
+                    );
+                  })}
+                </g>
+
+                {/* Render cauldron labels */}
+                <g>
+                  {projectedCauldrons.map((cauldron) => (
+                    <CauldronLabel
+                      key={`label-${cauldron.id}`}
+                      cauldron={cauldron}
+                      x={cauldron.x}
+                      y={cauldron.y}
+                    />
+                  ))}
+                </g>
+
+                {/* Render market */}
+                {projectedMarket && (
+                  <g style={{ pointerEvents: 'none' }}>
+                    <MarketIcon
+                      x={projectedMarket.x}
+                      y={projectedMarket.y}
+                      size={30}
+                      isHovered={false}
+                    />
+                  </g>
+                )}
+              </svg>
             </div>
+            
+            {/* Tooltip - rendered outside SVG for correct positioning */}
+            {hoveredNode && renderTooltip()}
           </div>
-
-          <svg
-            viewBox="0 0 1600 1600"
-            className="w-full h-full max-w-full max-h-full"
-            style={{ background: 'transparent' }}
-            preserveAspectRatio="xMidYMid meet"
-          >
-            <g transform={`translate(${pan.x}, ${pan.y}) scale(${zoom})`} transform-origin="800 800">
-            {/* Connection Lines (render first, so they appear behind nodes) */}
-            {renderEdges()}
-
-            {/* Market Node */}
-            {market && renderMarket()}
-
-            {/* Cauldron Nodes */}
-            {cauldronPositions.map(cauldron => renderCauldron(cauldron))}
-
-            {/* Hover Tooltip */}
-            {renderTooltip()}
-            </g>
-          </svg>
-
-          {/* Sample Route Info Banner */}
-          {showRoute && sampleRoute && (
-            <div className="absolute bottom-24 left-1/2 transform -translate-x-1/2 bg-yellow-500/90 text-gray-900 px-6 py-3 rounded-lg shadow-lg">
-              <p className="font-bold">🧹 Sample Route to {sampleRoute.cauldron.name || sampleRoute.cauldron.id}</p>
-              <p className="text-sm">Total Time: {sampleRoute.totalMin} min (Travel: {sampleRoute.travelMin} min + Unload: 15 min)</p>
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* Legend */}
-      <div className="p-4 bg-white/10 backdrop-blur-md border-t border-white/20">
-        <div className="max-w-7xl mx-auto flex items-center justify-center gap-6 text-sm text-white">
-          <div className="flex items-center gap-2">
-            <div className="w-4 h-4 rounded-full bg-green-500 border-2 border-white"></div>
-            <span>0-50% Full</span>
-          </div>
-          <div className="flex items-center gap-2">
-            <div className="w-4 h-4 rounded-full bg-blue-500 border-2 border-white"></div>
-            <span>50-70% Full</span>
-          </div>
-          <div className="flex items-center gap-2">
-            <div className="w-4 h-4 rounded-full bg-yellow-500 border-2 border-white"></div>
-            <span>70-90% Full</span>
-          </div>
-          <div className="flex items-center gap-2">
-            <div className="w-4 h-4 rounded-full bg-red-500 border-2 border-white"></div>
-            <span>90-100% Full (Critical)</span>
-          </div>
-          <div className="flex items-center gap-2">
-            <div className="w-6 h-6 rounded-full bg-purple-600 border-2 border-yellow-500"></div>
-            <span>🏪 Enchanted Market</span>
-          </div>
-        </div>
-      </div>
+        )}
     </div>
   );
 }
