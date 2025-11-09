@@ -2,14 +2,26 @@ import { useMemo } from 'react';
 
 function LevelChart({ levels }) {
   const chartData = useMemo(() => {
+    // Handle nested cauldron_levels format
+    if (levels && levels.length > 0 && levels[0].cauldron_levels) {
+      const cauldronLevels = levels[0].cauldron_levels;
+      return Object.entries(cauldronLevels).map(([id, volume]) => ({
+        id,
+        volume
+      }));
+    }
+    
+    // Handle array format
     const grouped = {};
-    levels.forEach(level => {
-      const id = level.cauldronId || level.cauldron_id || level.tankId;
-      const volume = level.volume || level.level || 0;
-      if (!grouped[id]) {
-        grouped[id] = volume;
-      }
-    });
+    if (Array.isArray(levels)) {
+      levels.forEach(level => {
+        const id = level.cauldronId || level.cauldron_id || level.tankId;
+        const volume = level.volume || level.level || 0;
+        if (!grouped[id]) {
+          grouped[id] = volume;
+        }
+      });
+    }
     return Object.entries(grouped).map(([id, volume]) => ({
       id,
       volume

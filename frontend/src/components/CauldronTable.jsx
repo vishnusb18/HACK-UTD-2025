@@ -2,14 +2,27 @@ import { useMemo } from 'react';
 
 function CauldronTable({ cauldrons, levels, detailed = false }) {
   const cauldronData = useMemo(() => {
+    // Extract cauldron_levels from the API response if it's nested
+    let levelData = {};
+    if (levels && levels.length > 0 && levels[0].cauldron_levels) {
+      levelData = levels[0].cauldron_levels;
+    } else if (Array.isArray(levels)) {
+      // Convert array format to object format
+      levels.forEach(l => {
+        const id = l.cauldronId || l.cauldron_id || l.tankId;
+        if (id) {
+          levelData[id] = l.volume || l.level || 0;
+        }
+      });
+    }
+    
     return cauldrons.map(cauldron => {
       const cauldronId = cauldron.id || cauldron.cauldronId || cauldron.cauldron_id;
-      const level = levels.find(l => 
-        (l.cauldronId || l.cauldron_id || l.tankId) === cauldronId
-      );
+      
+      // Get volume from the levelData object
+      const currentVolume = levelData[cauldronId] || 0;
       
       const maxVolume = cauldron.maxVolume || cauldron.max_volume || 1000;
-      const currentVolume = level?.volume || level?.level || 0;
       const fillPercentage = (currentVolume / maxVolume * 100);
       
       return {
