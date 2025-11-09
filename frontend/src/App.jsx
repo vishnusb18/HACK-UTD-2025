@@ -7,7 +7,10 @@ import LevelChart from './components/LevelChart';
 import ReconciliationPanel from './components/ReconciliationPanel';
 import MapView from './components/MapView';
 import CauldronDetail from './components/CauldronDetail';
+import RouteVisualization from './components/RouteVisualization';
+import RouteSchedule from './components/RouteSchedule';
 import { computePerCauldronSeries, aggregateDrainsPerCauldron } from './utils/reconciliation';
+import { optimizeRoutes } from './utils/routeOptimizer';
 
 function Dashboard() {
   const [cauldrons, setCauldrons] = useState([]);
@@ -19,6 +22,9 @@ function Dashboard() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [activeTab, setActiveTab] = useState('overview');
+  const [couriers, setCouriers] = useState([]);
+  const [market, setMarket] = useState(null);
+  const [network, setNetwork] = useState({ edges: [], description: '' });
 
   useEffect(() => {
     fetchData();
@@ -35,6 +41,12 @@ function Dashboard() {
         const r = await fetch('/api/cauldrons');
         if (!r.ok) throw new Error(`status ${r.status}`);
         cauldronData = await r.json();
+        
+        // Debug: Show cauldron ID/name mapping from API
+        console.log('🔍 Cauldron data from API:');
+        cauldronData.forEach(c => {
+          console.log(`  ${c.id || c.cauldron_id}: "${c.name || c.cauldron_name}"`);
+        });
       } catch (e) {
         errors.push(`cauldrons: ${e.message}`);
       }
@@ -72,6 +84,36 @@ function Dashboard() {
         errors.push(`levels/history: ${e.message}`);
       }
 
+      // Fetch couriers
+      let courierData = [];
+      try {
+        const r = await fetch('/api/information/couriers');
+        if (!r.ok) throw new Error(`status ${r.status}`);
+        courierData = await r.json();
+      } catch (e) {
+        errors.push(`couriers: ${e.message}`);
+      }
+
+      // Fetch market
+      let marketData = null;
+      try {
+        const r = await fetch('/api/information/market');
+        if (!r.ok) throw new Error(`status ${r.status}`);
+        marketData = await r.json();
+      } catch (e) {
+        errors.push(`market: ${e.message}`);
+      }
+
+      // Fetch network
+      let networkData = { edges: [], description: '' };
+      try {
+        const r = await fetch('/api/information/network');
+        if (!r.ok) throw new Error(`status ${r.status}`);
+        networkData = await r.json();
+      } catch (e) {
+        errors.push(`network: ${e.message}`);
+      }
+
       // compute fill rates from historical level data and merge into cauldron objects
       let enrichedCauldrons = cauldronData || [];
       try {
@@ -94,6 +136,9 @@ function Dashboard() {
   );
       setLevels(latestLevels || []);
       setAllLevels(historyLevels || []);
+      setCouriers(courierData || []);
+      setMarket(marketData);
+      setNetwork(networkData);
 
       if (errors.length) {
         throw new Error('Failed to fetch: ' + errors.join('; '));
@@ -139,6 +184,20 @@ function Dashboard() {
       return !isNaN(ts) && Math.floor(ts / 60000) * 60000 === selectedMinute;
     });
   }, [allLevels, timestamps, timeIndex, levels]);
+
+  // Optimize routes for minimum witches needed
+  const optimizationResult = useMemo(() => {
+    if (cauldrons.length === 0 || levels.length === 0 || couriers.length === 0 || !market) {
+      return null;
+    }
+    
+    try {
+      return optimizeRoutes(cauldrons, levels, market, network, couriers);
+    } catch (err) {
+      console.error('Route optimization failed:', err);
+      return null;
+    }
+  }, [cauldrons, levels, market, network, couriers]);
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-purple-900 via-purple-800 to-indigo-900 p-6">
@@ -198,7 +257,7 @@ function Dashboard() {
             {/* Tabs */}
             <div className="mb-6">
               <div className="flex gap-2 bg-white/10 backdrop-blur-md p-2 rounded-lg border border-white/20">
-                {['overview', 'cauldrons', 'tickets', 'reconcile'].map((tab) => (
+                {['overview', 'cauldrons', 'tickets', 'routes', 'reconcile'].map((tab) => (
                   <button
                     key={tab}
                     onClick={() => setActiveTab(tab)}
@@ -326,7 +385,44 @@ function Dashboard() {
                   </div>
                 </div>
               )}
-              
+
+              {activeTab === 'routes' && (
+                <div className="space-y-6">
+                  {/* Route Visualization */}
+                  <div className="bg-white/10 backdrop-blur-md rounded-lg shadow-2xl border border-white/20 p-3">
+                    <div className="mb-4">
+                      <h2 className="text-2xl font-bold text-white">🗺️ Optimized Courier Routes</h2>
+                      <p className="text-purple-200 text-sm mt-1">
+                        Visual representation of optimal witch routes to prevent cauldron overflow
+                      </p>
+                    </div>
+                    {optimizationResult ? (
+                      <RouteVisualization 
+                        routes={optimizationResult.routes}
+                        cauldrons={cauldrons}
+                        market={market}
+                        network={network}
+                        isAnimating={false}
+                        animationTime={0}
+                      />
+                    ) : (
+                      <div className="text-center py-12 text-purple-200">
+                        <p>Route optimization in progress...</p>
+                        <p className="text-sm mt-2">Ensure couriers, market, and network data are loaded</p>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Route Schedule */}
+                  <div>
+                    <RouteSchedule 
+                      optimizationResult={optimizationResult}
+                      cauldrons={cauldrons}
+                    />
+                  </div>
+                </div>
+              )}
+
               {activeTab === 'tickets' && (
                 <TicketTable tickets={tickets} />
               )}
