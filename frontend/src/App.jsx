@@ -44,6 +44,10 @@ function Dashboard() {
   const latestLevels = await latestRes.json();
   const historyLevels = await historyRes.json();
 
+  console.log('Cauldrons:', cauldronData);
+  console.log('Latest Levels:', latestLevels);
+  console.log('Sample level structure:', latestLevels[0]);
+
   setCauldrons(cauldronData);
   setTickets(ticketData);
   setLevels(latestLevels);
