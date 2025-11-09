@@ -76,13 +76,101 @@ function ReconciliationPanel() {
         const ticketed = ticketsByCauldron[id] || 0;
         const tol = Math.max(1, tolPct * Math.max(ticketed, drained));
         const diff = ticketed - drained;
+        
         if (Math.abs(diff) > tol) {
+          // Match tickets to drain events with improved time estimation
+          const ticketsForCauldron = ticketsByCauldronDetails[id] || [];
+          const drainEvents = info.events || [];
+          
+          if (id === 'cauldron_010' || id === 'cauldron_003') {
+            console.log(`${id}: ${drainEvents.length} drain events, ${ticketsForCauldron.length} tickets`);
+          }
+          
+          // Sort tickets by ticket ID to get chronological order
+          const sortedTickets = [...ticketsForCauldron].sort((a, b) => {
+            const idA = a.ticket_id || a.id || '';
+            const idB = b.ticket_id || b.id || '';
+            return idA.localeCompare(idB);
+          });
+          
+          // If we have drain events, distribute tickets across them
+          let ticketsWithTimes;
+          
+          if (drainEvents.length === 0) {
+            ticketsWithTimes = sortedTickets.map(ticket => ({ ...ticket, estimatedCollectionTime: null }));
+          } else if (drainEvents.length === 1) {
+            // Single drain event: distribute tickets proportionally across its duration
+            const event = drainEvents[0];
+            const duration = event.endTs - event.startTs;
+            
+            ticketsWithTimes = sortedTickets.map((ticket, ticketIdx) => {
+              const proportion = ticketIdx / Math.max(1, sortedTickets.length - 1);
+              const estimatedTime = event.startTs + (duration * proportion);
+              
+              if (id === 'cauldron_003' || id === 'cauldron_010') {
+                console.log(`${id} ticket ${ticketIdx}/${sortedTickets.length - 1}: proportion=${proportion.toFixed(2)}, duration=${duration/60000}min, time=${new Date(estimatedTime).toLocaleTimeString()}`);
+              }
+              
+              return { ...ticket, estimatedCollectionTime: estimatedTime };
+            });
+          } else {
+            // Multiple drain events: use greedy assignment to avoid duplicate times
+            const usedEvents = new Set();
+            
+            ticketsWithTimes = sortedTickets.map((ticket, ticketIdx) => {
+              const ticketAmount = Number(ticket.amount ?? ticket.amount_collected ?? ticket.amountCollected ?? ticket.volume ?? 0);
+              let closestEvent = null;
+              let closestDiff = Infinity;
+              
+              // Find best matching drain event that hasn't been used yet
+              drainEvents.forEach(event => {
+                if (usedEvents.has(event)) return;
+                
+                const correctedDrain = event.drop + (info.fillRate || 0) * ((event.endTs - event.startTs) / 60000);
+                const amountDiff = Math.abs(correctedDrain - ticketAmount);
+                if (amountDiff < closestDiff) {
+                  closestDiff = amountDiff;
+                  closestEvent = event;
+                }
+              });
+              
+              // If all events used, pick closest regardless
+              if (!closestEvent) {
+                drainEvents.forEach(event => {
+                  const correctedDrain = event.drop + (info.fillRate || 0) * ((event.endTs - event.startTs) / 60000);
+                  const amountDiff = Math.abs(correctedDrain - ticketAmount);
+                  if (amountDiff < closestDiff) {
+                    closestDiff = amountDiff;
+                    closestEvent = event;
+                  }
+                });
+              } else {
+                usedEvents.add(closestEvent);
+              }
+              
+              const estimatedTime = closestEvent 
+                ? closestEvent.startTs + (closestEvent.endTs - closestEvent.startTs) / 2
+                : null;
+              
+              if (id === 'cauldron_003' || id === 'cauldron_010') {
+                const eventVol = closestEvent ? (closestEvent.drop + (info.fillRate || 0) * ((closestEvent.endTs - closestEvent.startTs) / 60000)).toFixed(2) : 'none';
+                const timeStr = estimatedTime ? new Date(estimatedTime).toLocaleTimeString() : 'none';
+                console.log(`${id} ticket ${ticketIdx} (${ticketAmount.toFixed(2)}L): matched to event with ${eventVol}L, time=${timeStr}, used=${usedEvents.has(closestEvent)}`);
+              }
+              
+              return {
+                ...ticket,
+                estimatedCollectionTime: estimatedTime
+              };
+            });
+          }
+          
           discrepancies.push({ 
             cauldron_id: id, 
             drained, 
             ticketed, 
             diff,
-            tickets: ticketsByCauldronDetails[id] || []
+            tickets: ticketsWithTimes
           });
         }
       });
@@ -287,11 +375,13 @@ function ReconciliationPanel() {
                                   <div className="mb-3 p-3 bg-red-500/10 border border-red-500/30 rounded">
                                     <div className="text-sm">
                                       <div className="text-red-300 font-semibold mb-1">
-                                        ⚠️ {d.diff > 0 ? 'Over-Collection Detected' : 'Under-Collection or Theft Detected'}
+                                        ⚠️ {d.diff > 0 ? 'Over-Collection Detected' : d.drained === 0 ? 'No Drain Detected - Possible Fraud' : 'Under-Collection or Theft Detected'}
                                       </div>
                                       <div className="text-white">
                                         {d.diff > 0 
                                           ? `${d.ticketed.toFixed(2)}L was ticketed but only ${d.drained.toFixed(2)}L was estimated to have drained. Excess: ${d.diff.toFixed(2)}L`
+                                          : d.drained === 0
+                                          ? `${d.ticketed.toFixed(2)}L was ticketed but monitoring system detected NO volume decrease. This could indicate fraudulent tickets, sensor malfunction, or missing data.`
                                           : `${d.drained.toFixed(2)}L was estimated to have drained but only ${d.ticketed.toFixed(2)}L was ticketed. Missing: ${Math.abs(d.diff).toFixed(2)}L`
                                         }
                                       </div>
@@ -318,8 +408,8 @@ function ReconciliationPanel() {
                                       {d.tickets.map((ticket, idx) => {
                                         const ticketId = ticket.id || ticket.ticket_id || ticket.ticketId || `ticket-${idx}`;
                                         const amount = Number(ticket.amount ?? ticket.amount_collected ?? ticket.amountCollected ?? ticket.volume ?? 0);
-                                        const timestamp = ticket.timestamp || ticket.time || ticket.date || 'Unknown';
-                                        const destination = ticket.destination || ticket.market || ticket.to || 'Unknown';
+                                        const courierId = ticket.courier_id || ticket.courierId || ticket.courier || 'Unknown';
+                                        const estimatedTime = ticket.estimatedCollectionTime;
                                         
                                         return (
                                           <div key={ticketId} className="bg-white/5 border border-white/10 rounded p-3 text-sm">
@@ -333,12 +423,14 @@ function ReconciliationPanel() {
                                                 <span className="text-white ml-2 font-semibold">{amount.toFixed(2)} L</span>
                                               </div>
                                               <div>
-                                                <span className="text-purple-300">Time:</span>
-                                                <span className="text-white ml-2">{new Date(timestamp).toLocaleTimeString()}</span>
+                                                <span className="text-purple-300">Est. Time:</span>
+                                                <span className="text-white ml-2">
+                                                  {estimatedTime ? new Date(estimatedTime).toLocaleTimeString() : 'Unknown'}
+                                                </span>
                                               </div>
                                               <div>
-                                                <span className="text-purple-300">Destination:</span>
-                                                <span className="text-white ml-2">{destination}</span>
+                                                <span className="text-purple-300">Courier:</span>
+                                                <span className="text-white ml-2">{courierId}</span>
                                               </div>
                                             </div>
                                           </div>
