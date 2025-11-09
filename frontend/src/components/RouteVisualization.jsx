@@ -442,16 +442,6 @@ function RouteVisualization({ routes, cauldrons, market, network, isAnimating, a
             rx="3"
           />
           {/* Market label */}
-          <text
-            x="0"
-            y="90"
-            textAnchor="middle"
-            fill="#fbbf24"
-            fontSize="24"
-            fontWeight="bold"
-          >
-            Market
-          </text>
         </g>
       </svg>
 
