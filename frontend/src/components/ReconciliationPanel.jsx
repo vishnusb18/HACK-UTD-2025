@@ -17,11 +17,13 @@ function ReconciliationPanel() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [availableDates, setAvailableDates] = useState([]);
+  const [expandedCauldrons, setExpandedCauldrons] = useState(new Set());
 
   const handleReconcile = async () => {
     setLoading(true);
     setError(null);
     setResults(null);
+    setExpandedCauldrons(new Set()); // Reset expanded state
     try {
       const [tickets, levels] = await Promise.all([
         loadTickets(),
@@ -50,11 +52,24 @@ function ReconciliationPanel() {
 
       // per-cauldron ticket aggregation (tickets may include cauldronId)
       const ticketsByCauldron = {};
+      const ticketsByCauldronDetails = {}; // Store actual ticket objects
+      
+      console.log('All tickets for day:', ticketsForDay);
+      console.log('Sample ticket:', ticketsForDay[0]);
+      
       ticketsForDay.forEach(t => {
-        const id = t.cauldronId || t.cauldron_id || t.tankId || t.cauldron || null;
+        const id = t.cauldronId || t.cauldron_id || t.tankId || t.cauldron || t.source || t.from || null;
+        console.log(`Ticket processing - ID: ${id}, Ticket:`, t);
         const amt = Number(t.amount ?? t.amount_collected ?? t.amountCollected ?? t.volume ?? 0);
-        if (id) ticketsByCauldron[id] = (ticketsByCauldron[id] || 0) + amt;
+        if (id) {
+          ticketsByCauldron[id] = (ticketsByCauldron[id] || 0) + amt;
+          if (!ticketsByCauldronDetails[id]) ticketsByCauldronDetails[id] = [];
+          ticketsByCauldronDetails[id].push(t);
+        }
       });
+      
+      console.log('Tickets by cauldron:', ticketsByCauldron);
+      console.log('Cauldron IDs from drain detection:', Object.keys(perCauldron));
 
       // find discrepancies per cauldron
       const tolPct = 0.15;
@@ -65,7 +80,13 @@ function ReconciliationPanel() {
         const tol = Math.max(1, tolPct * Math.max(ticketed, drained));
         const diff = ticketed - drained;
         if (Math.abs(diff) > tol) {
-          discrepancies.push({ cauldron_id: id, drained, ticketed, diff });
+          discrepancies.push({ 
+            cauldron_id: id, 
+            drained, 
+            ticketed, 
+            diff,
+            tickets: ticketsByCauldronDetails[id] || []
+          });
         }
       });
 
@@ -101,6 +122,18 @@ function ReconciliationPanel() {
     })();
     return () => { mounted = false; };
   }, []);
+
+  const toggleCauldron = (cauldronId) => {
+    setExpandedCauldrons(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(cauldronId)) {
+        newSet.delete(cauldronId);
+      } else {
+        newSet.add(cauldronId);
+      }
+      return newSet;
+    });
+  };
 
   return (
     <div className="bg-white/10 backdrop-blur-md rounded-lg shadow-lg border border-white/20 overflow-hidden">
@@ -217,20 +250,104 @@ function ReconciliationPanel() {
                   <table className="w-full">
                     <thead className="bg-white/5 border-b border-white/20">
                       <tr>
+                        <th className="px-4 py-2 text-left text-xs font-semibold text-purple-200 w-12"></th>
                         <th className="px-4 py-2 text-left text-xs font-semibold text-purple-200">Cauldron</th>
                         <th className="px-4 py-2 text-left text-xs font-semibold text-purple-200">Drained (L)</th>
                         <th className="px-4 py-2 text-left text-xs font-semibold text-purple-200">Ticketed (L)</th>
                         <th className="px-4 py-2 text-left text-xs font-semibold text-purple-200">Diff (L)</th>
+                        <th className="px-4 py-2 text-left text-xs font-semibold text-purple-200">Tickets</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-white/10">
                       {results.discrepancies.map(d => (
-                        <tr key={d.cauldron_id} className="hover:bg-white/5">
-                          <td className="px-4 py-2 text-sm text-white">{d.cauldron_id}</td>
-                          <td className="px-4 py-2 text-sm text-purple-200">{d.drained.toFixed(2)}</td>
-                          <td className="px-4 py-2 text-sm text-purple-200">{d.ticketed.toFixed(2)}</td>
-                          <td className={"px-4 py-2 text-sm font-semibold " + (Math.abs(d.diff) < 1 ? 'text-green-400' : 'text-red-400')}>{d.diff.toFixed(2)}</td>
-                        </tr>
+                        <>
+                          <tr key={d.cauldron_id} className="hover:bg-white/5">
+                            <td className="px-4 py-2">
+                              <button
+                                onClick={() => toggleCauldron(d.cauldron_id)}
+                                className="text-purple-300 hover:text-purple-100 transition"
+                              >
+                                {expandedCauldrons.has(d.cauldron_id) ? '▼' : '▶'}
+                              </button>
+                            </td>
+                            <td className="px-4 py-2 text-sm text-white font-medium">{d.cauldron_id}</td>
+                            <td className="px-4 py-2 text-sm text-purple-200">{d.drained.toFixed(2)}</td>
+                            <td className="px-4 py-2 text-sm text-purple-200">{d.ticketed.toFixed(2)}</td>
+                            <td className={"px-4 py-2 text-sm font-semibold " + (Math.abs(d.diff) < 1 ? 'text-green-400' : 'text-red-400')}>{d.diff.toFixed(2)}</td>
+                            <td className="px-4 py-2 text-sm text-purple-200">{d.tickets.length}</td>
+                          </tr>
+                          {expandedCauldrons.has(d.cauldron_id) && (
+                            <tr key={`${d.cauldron_id}-details`}>
+                              <td colSpan="6" className="px-4 py-3 bg-white/5">
+                                <div className="pl-8">
+                                  <h4 className="text-sm font-semibold text-white mb-2">Discrepancy Details:</h4>
+                                  <div className="mb-3 p-3 bg-red-500/10 border border-red-500/30 rounded">
+                                    <div className="text-sm">
+                                      <div className="text-red-300 font-semibold mb-1">
+                                        ⚠️ {d.diff > 0 ? 'Over-Collection Detected' : 'Under-Collection or Theft Detected'}
+                                      </div>
+                                      <div className="text-white">
+                                        {d.diff > 0 
+                                          ? `${d.ticketed.toFixed(2)}L was ticketed but only ${d.drained.toFixed(2)}L was estimated to have drained. Excess: ${d.diff.toFixed(2)}L`
+                                          : `${d.drained.toFixed(2)}L was estimated to have drained but only ${d.ticketed.toFixed(2)}L was ticketed. Missing: ${Math.abs(d.diff).toFixed(2)}L`
+                                        }
+                                      </div>
+                                    </div>
+                                  </div>
+                                  
+                                  <h4 className="text-sm font-semibold text-white mb-2">Associated Tickets ({d.tickets.length}):</h4>
+                                  {d.tickets.length === 0 ? (
+                                    <div className="p-3 bg-yellow-500/10 border border-yellow-500/30 rounded">
+                                      <div className="text-sm text-yellow-300">
+                                        🚨 <strong>No tickets found for this cauldron!</strong>
+                                        <div className="mt-1 text-yellow-200">
+                                          This cauldron had {d.drained.toFixed(2)}L drained but no collection tickets were issued. This could indicate:
+                                        </div>
+                                        <ul className="mt-2 ml-4 list-disc text-yellow-200">
+                                          <li>Unauthorized collection (theft)</li>
+                                          <li>Missing or lost ticket documentation</li>
+                                          <li>System error in ticket recording</li>
+                                        </ul>
+                                      </div>
+                                    </div>
+                                  ) : (
+                                    <div className="space-y-2">
+                                      {d.tickets.map((ticket, idx) => {
+                                        const ticketId = ticket.id || ticket.ticket_id || ticket.ticketId || `ticket-${idx}`;
+                                        const amount = Number(ticket.amount ?? ticket.amount_collected ?? ticket.amountCollected ?? ticket.volume ?? 0);
+                                        const timestamp = ticket.timestamp || ticket.time || ticket.date || 'Unknown';
+                                        const destination = ticket.destination || ticket.market || ticket.to || 'Unknown';
+                                        
+                                        return (
+                                          <div key={ticketId} className="bg-white/5 border border-white/10 rounded p-3 text-sm">
+                                            <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+                                              <div>
+                                                <span className="text-purple-300">Ticket ID:</span>
+                                                <span className="text-white ml-2">{ticketId}</span>
+                                              </div>
+                                              <div>
+                                                <span className="text-purple-300">Amount:</span>
+                                                <span className="text-white ml-2 font-semibold">{amount.toFixed(2)} L</span>
+                                              </div>
+                                              <div>
+                                                <span className="text-purple-300">Time:</span>
+                                                <span className="text-white ml-2">{new Date(timestamp).toLocaleTimeString()}</span>
+                                              </div>
+                                              <div>
+                                                <span className="text-purple-300">Destination:</span>
+                                                <span className="text-white ml-2">{destination}</span>
+                                              </div>
+                                            </div>
+                                          </div>
+                                        );
+                                      })}
+                                    </div>
+                                  )}
+                                </div>
+                              </td>
+                            </tr>
+                          )}
+                        </>
                       ))}
                     </tbody>
                   </table>
