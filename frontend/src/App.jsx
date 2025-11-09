@@ -188,14 +188,10 @@ function Dashboard() {
             
 
             {/* Stats Cards */}
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
               <div className="bg-white/10 backdrop-blur-md p-6 rounded-lg shadow-lg border border-white/20">
                 <div className="text-purple-200 text-sm font-semibold">Total Cauldrons</div>
                 <div className="text-3xl font-bold text-white mt-2">{cauldrons.length}</div>
-              </div>
-              <div className="bg-white/10 backdrop-blur-md p-6 rounded-lg shadow-lg border border-white/20">
-                <div className="text-purple-200 text-sm font-semibold">Active Levels</div>
-                <div className="text-3xl font-bold text-white mt-2">{levels.length}</div>
               </div>
               <div className="bg-white/10 backdrop-blur-md p-6 rounded-lg shadow-lg border border-white/20">
                 <div className="text-purple-200 text-sm font-semibold">Transport Tickets</div>

@@ -18,6 +18,23 @@ function ReconciliationPanel() {
   const [error, setError] = useState(null);
   const [availableDates, setAvailableDates] = useState([]);
   const [expandedCauldrons, setExpandedCauldrons] = useState(new Set());
+  const [cauldrons, setCauldrons] = useState([]);
+
+  // Fetch cauldron info for names
+  useEffect(() => {
+    fetch('/api/cauldrons')
+      .then(res => res.json())
+      .then(data => setCauldrons(data || []))
+      .catch(err => console.warn('Failed to load cauldron names:', err));
+  }, []);
+
+  // Helper to get cauldron name from ID
+  const getCauldronName = (id) => {
+    const cauldron = cauldrons.find(c => 
+      c.id === id || c.cauldronId === id || c.cauldron_id === id
+    );
+    return cauldron?.name || cauldron?.cauldronName || id;
+  };
 
   const handleReconcile = async () => {
     setLoading(true);
@@ -421,7 +438,8 @@ function ReconciliationPanel() {
                   {results.details.map((detail) => (
                     <tr key={detail.cauldron_id} className="hover:bg-white/5">
                       <td className="px-4 py-3">
-                        <div className="text-sm font-medium text-white">{detail.cauldron_id}</div>
+                        <div className="text-sm font-medium text-white">{getCauldronName(detail.cauldron_id)}</div>
+                        <div className="text-xs text-purple-300">{detail.cauldron_id}</div>
                       </td>
                       <td className="px-4 py-3 text-sm text-white font-semibold">{(detail.drained || 0).toFixed(2)}</td>
                       <td className="px-4 py-3 text-sm text-purple-200">{(detail.fillRate || 0).toFixed(2)}</td>
@@ -470,7 +488,7 @@ function ReconciliationPanel() {
                                 {expandedCauldrons.has(d.cauldron_id) ? '▼' : '▶'}
                               </button>
                             </td>
-                            <td className="px-4 py-2 text-sm text-white font-medium">{d.cauldron_id}</td>
+                            <td className="px-4 py-2 text-sm text-white font-medium">{getCauldronName(d.cauldron_id)}</td>
                             <td className="px-4 py-2 text-sm text-purple-200">{d.drained.toFixed(2)}</td>
                             <td className="px-4 py-2 text-sm text-purple-200">{d.ticketed.toFixed(2)}</td>
                             <td className={"px-4 py-2 text-sm font-semibold " + (Math.abs(d.diff) < 1 ? 'text-green-400' : 'text-red-400')}>{d.diff.toFixed(2)}</td>
