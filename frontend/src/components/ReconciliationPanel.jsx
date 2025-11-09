@@ -42,24 +42,12 @@ function ReconciliationPanel() {
 
       const match = matchTicketsToDrains(ticketsForDay, totalDrained);
 
-      // build details for UI
-      const details = Object.entries(perCauldron).map(([id, info]) => ({
-        cauldron_id: id,
-        drained: info.drained,
-        fillRate: info.fillRate,
-        events: info.events
-      }));
-
       // per-cauldron ticket aggregation (tickets may include cauldronId)
       const ticketsByCauldron = {};
       const ticketsByCauldronDetails = {}; // Store actual ticket objects
       
-      console.log('All tickets for day:', ticketsForDay);
-      console.log('Sample ticket:', ticketsForDay[0]);
-      
       ticketsForDay.forEach(t => {
         const id = t.cauldronId || t.cauldron_id || t.tankId || t.cauldron || t.source || t.from || null;
-        console.log(`Ticket processing - ID: ${id}, Ticket:`, t);
         const amt = Number(t.amount ?? t.amount_collected ?? t.amountCollected ?? t.volume ?? 0);
         if (id) {
           ticketsByCauldron[id] = (ticketsByCauldron[id] || 0) + amt;
@@ -67,9 +55,18 @@ function ReconciliationPanel() {
           ticketsByCauldronDetails[id].push(t);
         }
       });
-      
-      console.log('Tickets by cauldron:', ticketsByCauldron);
-      console.log('Cauldron IDs from drain detection:', Object.keys(perCauldron));
+
+      // build details for UI
+      const details = Object.entries(perCauldron).map(([id, info]) => {
+        const ticketCount = ticketsByCauldronDetails[id]?.length || 0;
+        return {
+          cauldron_id: id,
+          drained: info.drained,
+          fillRate: info.fillRate,
+          events: info.events,
+          ticketCount: ticketCount
+        };
+      });
 
       // find discrepancies per cauldron
       const tolPct = 0.15;
@@ -219,7 +216,8 @@ function ReconciliationPanel() {
                     <th className="px-4 py-3 text-left text-xs font-semibold text-purple-200 uppercase">Cauldron</th>
                     <th className="px-4 py-3 text-left text-xs font-semibold text-purple-200 uppercase">Estimated Drained (L)</th>
                     <th className="px-4 py-3 text-left text-xs font-semibold text-purple-200 uppercase">Fill Rate (L/min)</th>
-                    <th className="px-4 py-3 text-left text-xs font-semibold text-purple-200 uppercase">Detected Events</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold text-purple-200 uppercase">Drain Periods</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold text-purple-200 uppercase">Tickets</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-white/10">
@@ -231,6 +229,11 @@ function ReconciliationPanel() {
                       <td className="px-4 py-3 text-sm text-white font-semibold">{(detail.drained || 0).toFixed(2)}</td>
                       <td className="px-4 py-3 text-sm text-purple-200">{(detail.fillRate || 0).toFixed(2)}</td>
                       <td className="px-4 py-3 text-sm text-purple-200">{detail.events.length}</td>
+                      <td className="px-4 py-3">
+                        <span className={`text-sm font-semibold ${detail.ticketCount === 0 ? 'text-red-400' : 'text-green-400'}`}>
+                          {detail.ticketCount}
+                        </span>
+                      </td>
                     </tr>
                   ))}
                 </tbody>

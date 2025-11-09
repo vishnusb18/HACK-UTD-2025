@@ -74,8 +74,9 @@ export function computePerCauldronSeries(allLevels) {
   return byId;
 }
 
-export function detectDrainEvents(series, minDrop = 0.5) {
+export function detectDrainEvents(series, minDrop = 5.0) {
   // series: [{ts, volume}, ...] sorted
+  // minDrop threshold increased to 5.0L to filter out sensor noise and focus on real drains
   const events = [];
   let inEvent = false;
   let ev = null;
