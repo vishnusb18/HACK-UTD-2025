@@ -1,4 +1,11 @@
 import { useState } from 'react';
+import {
+  loadTickets,
+  fetchLevelsForDay,
+  computePerCauldronSeries,
+  aggregateDrainsPerCauldron,
+  matchTicketsToDrains
+} from '../utils/reconciliation';
 
 function ReconciliationPanel() {
   const [selectedDate, setSelectedDate] = useState(() => {
@@ -13,22 +20,58 @@ function ReconciliationPanel() {
   const handleReconcile = async () => {
     setLoading(true);
     setError(null);
-    
+    setResults(null);
     try {
-      const response = await fetch('/api/reconcile', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ date: selectedDate }),
+      const [tickets, levels] = await Promise.all([
+        loadTickets(),
+        fetchLevelsForDay(selectedDate)
+      ]);
+
+      // filter tickets to the selected date
+      const ticketsForDay = tickets.filter(t => t.dateStr === selectedDate);
+
+      // compute per-cauldron series
+      const byId = computePerCauldronSeries(levels || []);
+      const perCauldron = aggregateDrainsPerCauldron(byId);
+
+      // total drained across all cauldrons for the day
+      const totalDrained = Object.values(perCauldron).reduce((s, v) => s + (v.drained || 0), 0);
+
+      const match = matchTicketsToDrains(ticketsForDay, totalDrained);
+
+      // build details for UI
+      const details = Object.entries(perCauldron).map(([id, info]) => ({
+        cauldron_id: id,
+        drained: info.drained,
+        fillRate: info.fillRate,
+        events: info.events
+      }));
+
+      // per-cauldron ticket aggregation (tickets may include cauldronId)
+      const ticketsByCauldron = {};
+      ticketsForDay.forEach(t => {
+        const id = t.cauldronId || t.cauldron_id || t.tankId || null;
+        const amt = Number(t.amount ?? t.volume ?? t.value ?? t.volumeCollected ?? 0);
+        if (id) ticketsByCauldron[id] = (ticketsByCauldron[id] || 0) + amt;
       });
 
-      if (!response.ok) {
-        throw new Error('Failed to reconcile data');
-      }
+      // find discrepancies per cauldron
+      const tolPct = 0.15;
+      const discrepancies = [];
+      Object.entries(perCauldron).forEach(([id, info]) => {
+        const drained = info.drained || 0;
+        const ticketed = ticketsByCauldron[id] || 0;
+        const tol = Math.max(1, tolPct * Math.max(ticketed, drained));
+        const diff = ticketed - drained;
+        if (Math.abs(diff) > tol) {
+          discrepancies.push({ cauldron_id: id, drained, ticketed, diff });
+        }
+      });
 
-      const data = await response.json();
-      setResults(data);
+      // tickets that have no associated cauldron (can't match)
+      const ticketsWithoutCauldron = ticketsForDay.filter(t => !(t.cauldronId || t.cauldron_id || t.tankId)).length;
+
+      setResults({ date: selectedDate, tickets: ticketsForDay, match, details, discrepancies, ticketsWithoutCauldron });
     } catch (err) {
       setError(err.message);
       console.error('Reconciliation error:', err);
@@ -84,19 +127,19 @@ function ReconciliationPanel() {
               <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                 <div>
                   <div className="text-xs text-purple-200">Total Cauldrons</div>
-                  <div className="text-2xl font-bold text-white">{results.summary.totalCauldrons}</div>
+                  <div className="text-2xl font-bold text-white">{results.details.length}</div>
                 </div>
                 <div>
-                  <div className="text-xs text-purple-200">Mismatched</div>
-                  <div className="text-2xl font-bold text-yellow-400">{results.summary.cauldronsMismatched}</div>
-                </div>
-                <div>
-                  <div className="text-xs text-purple-200">Total Drains</div>
-                  <div className="text-2xl font-bold text-white">{results.summary.totalDrains}</div>
+                  <div className="text-xs text-purple-200">Total Drained (est)</div>
+                  <div className="text-2xl font-bold text-white">{results.match.totalDrained.toFixed(2)} L</div>
                 </div>
                 <div>
                   <div className="text-xs text-purple-200">Total Tickets</div>
-                  <div className="text-2xl font-bold text-white">{results.summary.totalTickets}</div>
+                  <div className="text-2xl font-bold text-white">{results.match.ticketSum.toFixed(2)} L</div>
+                </div>
+                <div>
+                  <div className="text-xs text-purple-200">Reconciled</div>
+                  <div className={`text-2xl font-bold ${results.match.ok ? 'text-green-400' : 'text-red-400'}`}>{results.match.ok ? 'OK' : 'MISMATCH'}</div>
                 </div>
               </div>
             </div>
@@ -107,67 +150,59 @@ function ReconciliationPanel() {
                 <thead className="bg-white/5 border-b border-white/20">
                   <tr>
                     <th className="px-4 py-3 text-left text-xs font-semibold text-purple-200 uppercase">Cauldron</th>
-                    <th className="px-4 py-3 text-left text-xs font-semibold text-purple-200 uppercase">Drains</th>
-                    <th className="px-4 py-3 text-left text-xs font-semibold text-purple-200 uppercase">Total Drained</th>
-                    <th className="px-4 py-3 text-left text-xs font-semibold text-purple-200 uppercase">Tickets</th>
-                    <th className="px-4 py-3 text-left text-xs font-semibold text-purple-200 uppercase">Total Ticketed</th>
-                    <th className="px-4 py-3 text-left text-xs font-semibold text-purple-200 uppercase">Discrepancy</th>
-                    <th className="px-4 py-3 text-left text-xs font-semibold text-purple-200 uppercase">Status</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold text-purple-200 uppercase">Estimated Drained (L)</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold text-purple-200 uppercase">Fill Rate (L/min)</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold text-purple-200 uppercase">Detected Events</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-white/10">
                   {results.details.map((detail) => (
                     <tr key={detail.cauldron_id} className="hover:bg-white/5">
                       <td className="px-4 py-3">
-                        <div className="text-sm font-medium text-white">{detail.cauldron_name}</div>
-                        <div className="text-xs text-purple-300">{detail.cauldron_id}</div>
+                        <div className="text-sm font-medium text-white">{detail.cauldron_id}</div>
                       </td>
-                      <td className="px-4 py-3 text-sm text-purple-200">{detail.drains.length}</td>
-                      <td className="px-4 py-3 text-sm text-white font-semibold">
-                        {detail.totalDrained.toFixed(2)} L
-                      </td>
-                      <td className="px-4 py-3 text-sm text-purple-200">{detail.tickets.length}</td>
-                      <td className="px-4 py-3 text-sm text-white font-semibold">
-                        {detail.totalTicketed.toFixed(2)} L
-                      </td>
-                      <td className="px-4 py-3">
-                        <span className={`text-sm font-semibold ${
-                          Math.abs(detail.discrepancy) < 10 ? 'text-green-400' : 'text-red-400'
-                        }`}>
-                          {detail.discrepancy > 0 ? '+' : ''}{detail.discrepancy.toFixed(2)} L
-                        </span>
-                      </td>
-                      <td className="px-4 py-3">
-                        <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
-                          detail.status === 'OK' 
-                            ? 'bg-green-500/20 text-green-400' 
-                            : 'bg-red-500/20 text-red-400'
-                        }`}>
-                          {detail.status}
-                        </span>
-                      </td>
+                      <td className="px-4 py-3 text-sm text-white font-semibold">{(detail.drained || 0).toFixed(2)}</td>
+                      <td className="px-4 py-3 text-sm text-purple-200">{(detail.fillRate || 0).toFixed(2)}</td>
+                      <td className="px-4 py-3 text-sm text-purple-200">{detail.events.length}</td>
                     </tr>
                   ))}
                 </tbody>
               </table>
             </div>
-
-            {/* Suspicious Items */}
-            {results.details.some(d => d.status === 'SUSPICIOUS') && (
-              <div className="bg-red-500/10 border border-red-500/30 rounded-lg p-4">
-                <h3 className="text-lg font-semibold text-red-300 mb-3">⚠️ Suspicious Activity Detected</h3>
-                <div className="space-y-2">
-                  {results.details
-                    .filter(d => d.status === 'SUSPICIOUS')
-                    .map(detail => (
-                      <div key={detail.cauldron_id} className="text-sm text-red-200">
-                        <span className="font-semibold">{detail.cauldron_name}:</span> {detail.message}
-                      </div>
-                    ))
-                  }
+            {/* Discrepancies summary */}
+            <div className="mt-4 p-4 bg-white/5 border border-white/20 rounded-lg">
+              <h3 className="text-lg font-semibold text-white mb-2">Discrepancies</h3>
+              <div className="text-sm text-purple-200 mb-3">Found: <span className="font-bold text-white">{results.discrepancies.length}</span> cauldrons with discrepancies</div>
+              {results.ticketsWithoutCauldron > 0 && (
+                <div className="text-sm text-yellow-300 mb-3">{results.ticketsWithoutCauldron} ticket(s) without cauldron id — unable to match</div>
+              )}
+              {results.discrepancies.length === 0 ? (
+                <div className="text-sm text-green-300">No per-cauldron discrepancies detected (within tolerance).</div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full">
+                    <thead className="bg-white/5 border-b border-white/20">
+                      <tr>
+                        <th className="px-4 py-2 text-left text-xs font-semibold text-purple-200">Cauldron</th>
+                        <th className="px-4 py-2 text-left text-xs font-semibold text-purple-200">Drained (L)</th>
+                        <th className="px-4 py-2 text-left text-xs font-semibold text-purple-200">Ticketed (L)</th>
+                        <th className="px-4 py-2 text-left text-xs font-semibold text-purple-200">Diff (L)</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-white/10">
+                      {results.discrepancies.map(d => (
+                        <tr key={d.cauldron_id} className="hover:bg-white/5">
+                          <td className="px-4 py-2 text-sm text-white">{d.cauldron_id}</td>
+                          <td className="px-4 py-2 text-sm text-purple-200">{d.drained.toFixed(2)}</td>
+                          <td className="px-4 py-2 text-sm text-purple-200">{d.ticketed.toFixed(2)}</td>
+                          <td className={"px-4 py-2 text-sm font-semibold " + (Math.abs(d.diff) < 1 ? 'text-green-400' : 'text-red-400')}>{d.diff.toFixed(2)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
                 </div>
-              </div>
-            )}
+              )}
+            </div>
           </div>
         )}
 

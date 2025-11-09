@@ -23,27 +23,59 @@ function App() {
     try {
       setLoading(true);
       // fetch latest for summary widgets and full history for the time slider
-      const [cauldronRes, ticketRes, latestRes, historyRes] = await Promise.all([
-        fetch('/api/cauldrons'),
-        fetch('/api/tickets'),
-        fetch('/api/levels/latest'),
-        // request all levels (backend proxies to HackUTD). This may be large — we normalize to minute resolution below.
-        fetch('/api/levels?start_date=0&end_date=2000000000')
-      ]);
+      const errors = [];
 
-      if (!cauldronRes.ok || !ticketRes.ok || !latestRes.ok || !historyRes.ok) {
-        throw new Error('Failed to fetch data');
+      let cauldronData = [];
+      try {
+        const r = await fetch('/api/cauldrons');
+        if (!r.ok) throw new Error(`status ${r.status}`);
+        cauldronData = await r.json();
+      } catch (e) {
+        errors.push(`cauldrons: ${e.message}`);
       }
 
-  const cauldronData = await cauldronRes.json();
-  const ticketData = await ticketRes.json();
-  const latestLevels = await latestRes.json();
-  const historyLevels = await historyRes.json();
+      let ticketData = [];
+      try {
+        const r = await fetch('/api/tickets');
+        if (!r.ok) throw new Error(`status ${r.status}`);
+        ticketData = await r.json();
+        // debug: log what we received from the tickets endpoint
+        try {
+          console.debug('fetch /api/tickets ->', Array.isArray(ticketData) ? `array(${ticketData.length})` : typeof ticketData, ticketData);
+        } catch (e) {
+          console.debug('fetch /api/tickets -> (failed to stringify)', e);
+        }
+      } catch (e) {
+        errors.push(`tickets: ${e.message}`);
+      }
 
-  setCauldrons(cauldronData);
-  setTickets(ticketData);
-  setLevels(latestLevels);
-  setAllLevels(historyLevels || []);
+      let latestLevels = [];
+      try {
+        const r = await fetch('/api/levels/latest');
+        if (!r.ok) throw new Error(`status ${r.status}`);
+        latestLevels = await r.json();
+      } catch (e) {
+        errors.push(`levels/latest: ${e.message}`);
+      }
+
+      let historyLevels = [];
+      try {
+        const r = await fetch('/api/levels?start_date=0&end_date=2000000000');
+        if (!r.ok) throw new Error(`status ${r.status}`);
+        historyLevels = await r.json();
+      } catch (e) {
+        errors.push(`levels/history: ${e.message}`);
+      }
+
+      // set what we have
+      setCauldrons(cauldronData || []);
+      setTickets(Array.isArray(ticketData) ? ticketData : (ticketData?.tickets || []));
+      setLevels(latestLevels || []);
+      setAllLevels(historyLevels || []);
+
+      if (errors.length) {
+        throw new Error('Failed to fetch: ' + errors.join('; '));
+      }
       setError(null);
     } catch (err) {
       setError(err.message);
