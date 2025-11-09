@@ -8,6 +8,150 @@
  */
 
 /**
+ * Calculate drain rate for each cauldron from historical level data
+ * Detects ANY decrease in level and calculates the actual drain rate
+ * accounting for the continuous fill rate
+ */
+function calculateDrainRatesFromHistory(cauldrons, allLevels) {
+  const drainRates = {};
+  
+  console.log('📊 ========== CALCULATING DRAIN RATES ==========');
+  console.log(`   Total level readings available: ${allLevels.length}`);
+  
+  // First, let's see what cauldron IDs we have in the data
+  const uniqueCauldronIds = new Set();
+  allLevels.forEach(l => {
+    const id = l.cauldron_id || l.cauldronId || l.id;
+    if (id) uniqueCauldronIds.add(id);
+  });
+  console.log(`   Unique cauldron IDs in level data: ${Array.from(uniqueCauldronIds).join(', ')}`);
+  
+  cauldrons.forEach(cauldron => {
+    const cauldronId = cauldron.id || cauldron.cauldronId || cauldron.cauldron_id;
+    const fillRate = cauldron.fillRate || cauldron.fill_rate || 0;
+    
+    console.log(`\n  🔍 Analyzing ${cauldronId}:`);
+    console.log(`     Fill rate: ${fillRate.toFixed(4)} L/min`);
+    
+    // Get all level readings for this cauldron, sorted by time
+    const cauldronLevels = allLevels
+      .filter(l => {
+        const id = l.cauldron_id || l.cauldronId || l.id;
+        return id === cauldronId;
+      })
+      .map(l => ({
+        timestamp: new Date(l.timestamp || l.date || l.time).getTime(),
+        level: l.level || l.volume || 0,
+        raw: l
+      }))
+      .sort((a, b) => a.timestamp - b.timestamp);
+    
+    console.log(`     Found ${cauldronLevels.length} level readings`);
+    
+    if (cauldronLevels.length < 2) {
+      drainRates[cauldronId] = 50;
+      console.log(`     ⚠️ Not enough data, using default 50 L/min`);
+      return;
+    }
+    
+    // Show first few readings
+    console.log(`     First 5 readings:`);
+    cauldronLevels.slice(0, 5).forEach((reading, idx) => {
+      console.log(`       ${idx + 1}. ${new Date(reading.timestamp).toLocaleString()}: ${reading.level.toFixed(2)}L`);
+    });
+    
+    // Look for ANY decrease in level (drain events)
+    const drainEvents = [];
+    let totalComparisons = 0;
+    let decreaseCount = 0;
+    
+    for (let i = 1; i < cauldronLevels.length; i++) {
+      const prev = cauldronLevels[i - 1];
+      const curr = cauldronLevels[i];
+      
+      totalComparisons++;
+      
+      const timeDiffMinutes = (curr.timestamp - prev.timestamp) / (1000 * 60);
+      const levelChange = curr.level - prev.level;
+      
+      // Skip if time difference is invalid
+      if (timeDiffMinutes <= 0 || timeDiffMinutes > 240) {
+        continue;
+      }
+      
+      // Drain event: ANY decrease in level
+      if (levelChange < 0) {
+        decreaseCount++;
+        
+        // Calculate observed rate of change (negative during drain)
+        const observedRate = levelChange / timeDiffMinutes;
+        
+        // While draining, the cauldron is STILL being filled
+        // observedRate = fillRate - drainRate (net change)
+        // So: drainRate = fillRate - observedRate
+        const actualDrainRate = fillRate - observedRate;
+        
+        // Debug the first few decreases to see why they're being rejected
+        if (decreaseCount <= 5) {
+          console.log(`     Decrease #${decreaseCount}:`);
+          console.log(`       Time: ${new Date(curr.timestamp).toLocaleString()}`);
+          console.log(`       Level: ${prev.level.toFixed(2)}L → ${curr.level.toFixed(2)}L over ${timeDiffMinutes.toFixed(2)} min`);
+          console.log(`       Change: ${levelChange.toFixed(2)}L`);
+          console.log(`       Observed rate: ${observedRate.toFixed(2)} L/min`);
+          console.log(`       Fill rate: ${fillRate.toFixed(4)} L/min`);
+          console.log(`       Calculated drain rate: ${actualDrainRate.toFixed(4)} L/min`);
+          console.log(`       Passes sanity check? ${actualDrainRate > 0.01 && actualDrainRate < 500}`);
+        }
+        
+        // Sanity checks: drain rate should be positive and reasonable
+        // Lowered threshold from 1 to 0.01 to catch small drain rates
+        if (actualDrainRate > 0.01 && actualDrainRate < 500) {
+          drainEvents.push({
+            time: new Date(curr.timestamp).toISOString(),
+            timeDiffMinutes: timeDiffMinutes,
+            prevLevel: prev.level,
+            currLevel: curr.level,
+            levelChange: levelChange,
+            observedRate: observedRate,
+            actualDrainRate: actualDrainRate
+          });
+          
+          // Log first 5 valid drain events
+          if (drainEvents.length <= 5) {
+            console.log(`     ✅ Valid drain event #${drainEvents.length}:`);
+            console.log(`       Time: ${new Date(curr.timestamp).toLocaleString()}`);
+            console.log(`       Level: ${prev.level.toFixed(2)}L → ${curr.level.toFixed(2)}L over ${timeDiffMinutes.toFixed(2)} min`);
+            console.log(`       Calculated drain rate: ${actualDrainRate.toFixed(2)} L/min`);
+          }
+        }
+      }
+    }
+    
+    console.log(`     Comparisons: ${totalComparisons}, Decreases found: ${decreaseCount}, Valid drain events: ${drainEvents.length}`);
+    
+    if (drainEvents.length > 0) {
+      // Average the drain rates from all detected drain events
+      const avgDrainRate = drainEvents.reduce((sum, evt) => sum + evt.actualDrainRate, 0) / drainEvents.length;
+      drainRates[cauldronId] = avgDrainRate;
+      
+      console.log(`     ✅ RESULT: ${drainEvents.length} drain events detected → avg drain rate: ${avgDrainRate.toFixed(2)} L/min`);
+    } else {
+      drainRates[cauldronId] = 50;
+      console.log(`     ⚠️ RESULT: No valid drain events detected → using default 50 L/min`);
+    }
+  });
+  
+  console.log('\n📊 ========== DRAIN RATE SUMMARY ==========');
+  Object.entries(drainRates).forEach(([id, rate]) => {
+    console.log(`   ${id}: ${rate.toFixed(2)} L/min`);
+  });
+  
+  return drainRates;
+}
+
+
+
+/**
  * Build adjacency map from network edges for fast lookups
  * Uses travel_time_minutes directly from API (same as MapView)
  */
@@ -126,9 +270,181 @@ export function getTravelTime(fromId, toId, network, adjacency = null) {
 }
 
 /**
- * Calculate when each cauldron will overflow based on current level and fill rate
+ * Verify that no cauldrons will overflow given the scheduled routes
+ * Simulates cauldron levels over time with fills and drains
  */
-export function calculateOverflowTimes(cauldrons, levels) {
+function verifyNoOverflows(routes, cauldronStates, levels) {
+  console.log(`\n🔍 Starting overflow verification...`);
+  console.log(`Using ACTUAL current levels from API data (as of simulation start time)`);
+  
+  // Create a timeline of all service events
+  const events = []; // {time, cauldronId, action: 'drain', volumeDrained}
+  
+  routes.forEach((witchRoute, witchIdx) => {
+    witchRoute.trips.forEach((trip, tripIdx) => {
+      trip.stops.forEach((stop, stopIdx) => {
+        if (!stop.isMarket && stop.cauldronId) {
+          events.push({
+            time: stop.arrivalTime,
+            cauldronId: stop.cauldronId,
+            action: 'drain',
+            volumeDrained: stop.volumeCollected,
+            drainDuration: stop.drainTime,
+            witchName: witchRoute.witchName,
+            tripNum: tripIdx + 1,
+            stopNum: stopIdx + 1
+          });
+        }
+      });
+    });
+  });
+  
+  // Sort events by time
+  events.sort((a, b) => a.time - b.time);
+  
+  console.log(`  Found ${events.length} drain events across all routes`);
+  
+  // Simulate each cauldron's level over time
+  const overflowIssues = [];
+  const criticalWarnings = [];
+  
+  console.log(`\n📊 Simulating each cauldron over time:`);
+  
+  cauldronStates.forEach((cauldron) => {
+    const cauldronId = cauldron.id;
+    const maxVolume = cauldron.maxVolume;
+    const fillRate = cauldron.fillRate; // L/min
+    let currentLevel = cauldron.currentLevel; // Using ACTUAL current level from API
+    const startLevel = currentLevel;
+    let currentTime = 0;
+    
+    // Get all events for this cauldron
+    const cauldronEvents = events.filter(e => e.cauldronId === cauldronId);
+    
+    if (cauldronEvents.length === 0) {
+      console.warn(`  ⚠️ ${cauldronId}: No service events scheduled!`);
+      // Check if it will overflow without any service
+      const timeToOverflow = (maxVolume - currentLevel) / fillRate;
+      if (timeToOverflow < 1440) { // Less than 24 hours
+        overflowIssues.push({
+          cauldronId,
+          time: timeToOverflow,
+          level: maxVolume,
+          maxVolume,
+          overflow: 0,
+          message: `NO SERVICE SCHEDULED - will overflow in ${(timeToOverflow / 60).toFixed(1)} hours`
+        });
+      }
+      return;
+    }
+    
+    console.log(`\n  ${cauldronId} (${cauldron.name}):`);
+    console.log(`    Start: ${startLevel.toFixed(1)}L / ${maxVolume}L (${((startLevel/maxVolume)*100).toFixed(1)}%)`);
+    console.log(`    Fill rate: ${fillRate.toFixed(2)} L/min`);
+    console.log(`    Scheduled visits: ${cauldronEvents.length}`);
+    
+    // Simulate through each event
+    cauldronEvents.forEach((event, idx) => {
+      // Fill from current time to event time
+      const timePassed = event.time - currentTime;
+      const volumeFilled = fillRate * timePassed;
+      currentLevel += volumeFilled;
+      
+      // Check for overflow BEFORE drain
+      if (currentLevel > maxVolume) {
+        const overflowAmount = currentLevel - maxVolume;
+        overflowIssues.push({
+          cauldronId,
+          time: event.time,
+          level: currentLevel,
+          maxVolume,
+          overflow: overflowAmount,
+          message: `Overflows by ${overflowAmount.toFixed(1)}L at t=${(event.time/60).toFixed(1)}h (before ${event.witchName} arrives)`
+        });
+        console.error(`    ❌ Visit ${idx + 1}: OVERFLOW at t=${(event.time/60).toFixed(1)}h - level ${currentLevel.toFixed(1)}L > max ${maxVolume}L`);
+      } else {
+        const percentBefore = (currentLevel / maxVolume) * 100;
+        if (percentBefore > 95) {
+          criticalWarnings.push({
+            cauldronId,
+            time: event.time,
+            level: currentLevel,
+            percentFull: percentBefore
+          });
+          console.warn(`    ⚠️ Visit ${idx + 1}: CRITICAL at t=${(event.time/60).toFixed(1)}h - level ${currentLevel.toFixed(1)}L (${percentBefore.toFixed(1)}%)`);
+        } else {
+          console.log(`    ✓ Visit ${idx + 1}: ${event.witchName} arrives at t=${(event.time/60).toFixed(1)}h - level ${currentLevel.toFixed(1)}L (${percentBefore.toFixed(1)}%)`);
+        }
+      }
+      
+      // Apply drain
+      currentLevel -= event.volumeDrained;
+      currentTime = event.time + event.drainDuration;
+      
+      const percentAfter = (currentLevel / maxVolume) * 100;
+      console.log(`      Drains ${event.volumeDrained.toFixed(1)}L → ${currentLevel.toFixed(1)}L (${percentAfter.toFixed(1)}%)`);
+      
+      // Check if this is the last event - project forward
+      if (idx === cauldronEvents.length - 1) {
+        const timeToOverflow = (maxVolume - currentLevel) / fillRate;
+        console.log(`      After last visit: ${currentLevel.toFixed(1)}L, will overflow in ${(timeToOverflow / 60).toFixed(1)} hours`);
+        
+        if (timeToOverflow < 120) { // Less than 2 hours
+          console.warn(`      ⚠️ Only ${(timeToOverflow / 60).toFixed(1)} hours until overflow after last service!`);
+        }
+        
+        // CRITICAL: Check if schedule is sustainable (will the next cycle start before overflow?)
+        // The next cycle would start at the same time as this cycle (periodic schedule)
+        const cycleTime = event.time + event.drainDuration; // Time when this visit ends
+        const timeSinceStart = cycleTime; // Assuming we start next cycle immediately
+        
+        // If the cauldron fills faster than we're servicing it, it's unsustainable
+        if (timeToOverflow < cycleTime) {
+          overflowIssues.push({
+            cauldronId,
+            time: currentTime + timeToOverflow,
+            level: maxVolume,
+            maxVolume,
+            overflow: 0,
+            message: `UNSUSTAINABLE: Will overflow ${(timeToOverflow / 60).toFixed(1)}h after last service, but cycle takes ${(cycleTime / 60).toFixed(1)}h`
+          });
+          console.error(`      ❌ UNSUSTAINABLE SCHEDULE: Needs service every ${(timeToOverflow / 60).toFixed(1)}h but cycle takes ${(cycleTime / 60).toFixed(1)}h`);
+        }
+      }
+    });
+  });
+  
+  // Report results
+  console.log(`\n${'='.repeat(80)}`);
+  if (overflowIssues.length > 0) {
+    console.error(`\n❌ OVERFLOW ISSUES DETECTED (${overflowIssues.length} cases):`);
+    overflowIssues.forEach(issue => {
+      console.error(`  ${issue.cauldronId}: ${issue.message}`);
+    });
+    console.error(`\n⚠️ THE SCHEDULE WILL RESULT IN OVERFLOWS!`);
+    console.error(`   This schedule is NOT sustainable long-term.`);
+    console.error(`   Need more frequent visits, more witches, or faster drain rates.`);
+  } else if (criticalWarnings.length > 0) {
+    console.warn(`\n⚠️ ${criticalWarnings.length} CRITICAL WARNINGS (>95% full before service):`);
+    criticalWarnings.forEach(warn => {
+      console.warn(`  ${warn.cauldronId}: ${warn.percentFull.toFixed(1)}% full at t=${(warn.time/60).toFixed(1)}h`);
+    });
+    console.log(`\n✅ NO OVERFLOWS - but some cauldrons get very full. Consider more frequent visits.`);
+    console.log(`✅ Schedule appears SUSTAINABLE for repeated cycles.`);
+  } else {
+    console.log(`\n✅ NO OVERFLOWS DETECTED - All cauldrons serviced safely!`);
+    console.log(`✅ Schedule is SUSTAINABLE - can repeat indefinitely without overflows.`);
+  }
+  console.log(`${'='.repeat(80)}\n`);
+  
+  return overflowIssues.length === 0;
+}
+
+/**
+ * Calculate when each cauldron will overflow based on current level and fill rate
+ * Now includes calculated drain rates
+ */
+export function calculateOverflowTimes(cauldrons, levels, drainRates = {}) {
   return cauldrons.map(cauldron => {
     const cauldronId = cauldron.id || cauldron.cauldronId || cauldron.cauldron_id;
     const levelData = levels.find(l => 
@@ -138,6 +454,7 @@ export function calculateOverflowTimes(cauldrons, levels) {
     const currentLevel = levelData?.level || levelData?.volume || 0;
     const maxVolume = cauldron.maxVolume || cauldron.max_volume || 1000;
     const fillRate = cauldron.fillRate || cauldron.fill_rate || 0;
+    const drainRate = drainRates[cauldronId] || 50; // Use calculated drain rate or default
     
     // Time until overflow in minutes
     const timeUntilOverflow = fillRate > 0 
@@ -150,6 +467,7 @@ export function calculateOverflowTimes(cauldrons, levels) {
       currentLevel,
       maxVolume,
       fillRate,
+      drainRate, // Include the calculated drain rate
       timeUntilOverflow,
       location: {
         lat: cauldron.latitude || cauldron.lat || 0,
@@ -161,42 +479,89 @@ export function calculateOverflowTimes(cauldrons, levels) {
 
 /**
  * Calculate how long it takes to drain a cauldron
+ * Uses the cauldron's calculated drain rate from historical data
  * We drain what we can carry (up to 100L), not necessarily to a target level
  */
 export function calculateDrainTime(cauldron, currentLevel) {
-  const drainRate = 50; // L/min - assume constant drain rate
-  
-  // We'll drain up to 85L (85% of 100L capacity)
-  const volumeToDrain = Math.min(85, currentLevel * 0.5); // Take up to half or 85L
+  // Use the cauldron's specific drain rate (calculated from historical data)
+  const drainRate = cauldron.drainRate || 50; // Should have been set by calculateOverflowTimes
   
   // Account for fill rate during drain
+  // While we're draining, potion is still being added at the fill rate
   const effectiveDrainRate = drainRate - cauldron.fillRate;
   
   if (effectiveDrainRate <= 0) {
     // Filling faster than we can drain - still try but cap the time
-    console.warn(`⚠️ Cauldron ${cauldron.id} fills at ${cauldron.fillRate} L/min (faster than drain!)`);
+    console.warn(`⚠️ Cauldron ${cauldron.id} fills at ${cauldron.fillRate.toFixed(2)} L/min (faster than drain rate ${drainRate.toFixed(2)} L/min!)`);
     return 30; // 30 minutes, still service it
   }
   
-  const drainTime = volumeToDrain / effectiveDrainRate;
-  return Math.max(10, Math.min(drainTime, 60)); // 10-60 minutes
+  // Calculate how much we should drain to bring cauldron to a safe level
+  // Target: drain to 30% of max capacity
+  const targetLevel = cauldron.maxVolume * 0.30;
+  const volumeNeeded = Math.max(0, currentLevel - targetLevel);
+  
+  // CRITICAL FIX: Don't assume we're draining 100L if cauldron doesn't have that much!
+  // Respect witch capacity limit (100L max) BUT also respect what's actually available
+  const actualVolumeToDrain = Math.min(
+    volumeNeeded,      // What we need to drain to reach 30%
+    100,               // Witch capacity limit (full 100L)
+    currentLevel * 0.7 // Don't drain more than 70% of current level (keep some minimum)
+  );
+  
+  // Calculate actual drain time based on realistic volume (no artificial cap)
+  // Witches can stay as long as needed to drain properly
+  const drainTime = actualVolumeToDrain / effectiveDrainRate;
+  const finalDrainTime = Math.max(5, drainTime); // At least 5 minutes
+  
+  // Log when using calculated (non-default) drain rate
+  if (cauldron.drainRate !== undefined && cauldron.drainRate !== 50) {
+    console.log(`    ✓ ${cauldron.id}: drain rate ${drainRate.toFixed(2)} L/min (eff: ${effectiveDrainRate.toFixed(2)}) → ${finalDrainTime.toFixed(1)} min for ${actualVolumeToDrain.toFixed(1)}L`);
+  } else {
+    console.log(`    ⚠️ ${cauldron.id}: using DEFAULT drain rate 50 L/min → drain time ${finalDrainTime.toFixed(1)} min`);
+  }
+  
+  return finalDrainTime;
 }
 
 /**
  * Calculate volume that will be collected from a cauldron
- * CRITICAL: Witches can only carry 100L max per trip!
- * We don't need to drain to 20% - just drain enough to keep it manageable
+ * CRITICAL: Must use the SAME logic as calculateDrainTime to avoid circular calculation
  */
 export function calculateDrainVolume(cauldron, currentLevel, drainTime, maxCapacity = 100) {
-  // Target: drain to 30% (more lenient) OR drain what we can carry, whichever is less
+  // Use the SAME logic as calculateDrainTime to determine actual volume
+  // (Don't recalculate from time - that creates circular logic!)
+  
   const targetLevel = cauldron.maxVolume * 0.30;
-  const volumeToDrain = Math.max(0, currentLevel - targetLevel);
+  const volumeNeeded = Math.max(0, currentLevel - targetLevel);
   
-  // CRITICAL: One witch can only take what fits in their capacity
-  // Take at least 20L to make the trip worthwhile, up to capacity limit
-  const volumeCollected = Math.max(20, Math.min(volumeToDrain, maxCapacity * 0.85));
+  // Available to drain: Don't drain more than 70% of current level (keep 30% minimum)
+  const availableToDrain = Math.max(0, currentLevel * 0.7);
   
-  return volumeCollected;
+  // CRITICAL FIX: Use the EXACT SAME calculation as calculateDrainTime
+  // The witch can carry the full maxCapacity (100L)
+  const witchCapacityLimit = maxCapacity; // Full 100L capacity
+  
+  // Take the minimum of what we need, what's available, and what witch can carry
+  const volumeCollected = Math.min(
+    volumeNeeded,           // What we need to drain to reach 30% target
+    availableToDrain,       // What's safely available (70% of current)
+    witchCapacityLimit      // Witch capacity limit (100L)
+  );
+  
+  // At least 10L to make the trip worthwhile
+  const result = Math.max(10, volumeCollected);
+  
+  // Debug logging
+  if (Math.random() < 0.05) { // Log 5% of calculations
+    console.log(`    📊 calculateDrainVolume for ${cauldron.id}:`);
+    console.log(`       currentLevel: ${currentLevel.toFixed(1)}L, maxVolume: ${cauldron.maxVolume.toFixed(1)}L`);
+    console.log(`       targetLevel: ${targetLevel.toFixed(1)}L, volumeNeeded: ${volumeNeeded.toFixed(1)}L`);
+    console.log(`       availableToDrain: ${availableToDrain.toFixed(1)}L, witchLimit: ${witchCapacityLimit.toFixed(1)}L`);
+    console.log(`       volumeCollected: ${volumeCollected.toFixed(1)}L, RESULT: ${result.toFixed(1)}L`);
+  }
+  
+  return result;
 }
 
 /**
@@ -248,8 +613,18 @@ function findNextCriticalCauldron(
     const travelTime = cauldron.pathDistance;
     const arrivalTime = currentTime + travelTime;
     
+    // Debug: Check drain rate before calling calculateDrainTime
+    if (reachable.indexOf(cauldron) < 2) { // Only log first 2 to avoid spam
+      console.log(`      🔬 ${cauldron.id} before calculateDrainTime: drainRate = ${cauldron.drainRate?.toFixed(2) || 'UNDEFINED'}`);
+    }
+    
     const drainTime = calculateDrainTime(cauldron, cauldron.currentLevel);
     const volumeToCollect = calculateDrainVolume(cauldron, cauldron.currentLevel, drainTime, maxCapacity);
+    
+    // Debug: Log volume calculation for first few
+    if (reachable.indexOf(cauldron) < 2) {
+      console.log(`      📦 ${cauldron.id} volume calc: currentLevel=${cauldron.currentLevel.toFixed(1)}L, maxVol=${cauldron.maxVolume.toFixed(1)}L → collecting ${volumeToCollect.toFixed(1)}L`);
+    }
     
     // Calculate time buffer - but be VERY lenient
     const timeBuffer = cauldron.timeUntilOverflow - arrivalTime;
@@ -262,14 +637,14 @@ function findNextCriticalCauldron(
         continue;
       }
       
-      // Check capacity - allow filling up to 90% of capacity
-      if (currentCapacity + volumeToCollect > maxCapacity * 0.9) {
+      // Check capacity - use full capacity (100L)
+      if (currentCapacity + volumeToCollect > maxCapacity) {
         rejected.push({id: cauldron.id, reason: 'capacity', would: (currentCapacity + volumeToCollect).toFixed(1), max: maxCapacity});
         continue;
       }
     } else {
-      // Even on first stop, don't take more than capacity
-      if (volumeToCollect > maxCapacity * 0.95) {
+      // Even on first stop, don't exceed capacity
+      if (volumeToCollect > maxCapacity) {
         rejected.push({id: cauldron.id, reason: 'too large', volume: volumeToCollect.toFixed(1)});
         continue;
       }
@@ -389,19 +764,24 @@ function buildSingleRoute(
       const afterDrainLevel = cauldronData.currentLevel - nextCauldron.volumeToCollect;
       const percentFullAfter = (afterDrainLevel / cauldronData.maxVolume) * 100;
       
-      // If we brought it below 70%, consider it serviced for this round
-      if (percentFullAfter < 70) {
-        console.log(`      ✅ ${nextCauldron.id} now at ${percentFullAfter.toFixed(1)}% - SERVICED`);
+      // Update the cauldron's level for future calculations
+      cauldronData.currentLevel = afterDrainLevel;
+      
+      // With low drain rates, cauldrons need frequent visits
+      // Only consider it "fully serviced" if it's well below 50%
+      // This will keep it in rotation for more frequent visits
+      if (percentFullAfter < 50) {
+        console.log(`      ✅ ${nextCauldron.id} now at ${percentFullAfter.toFixed(1)}% - SERVICED FOR NOW`);
         fullyServiced.push(nextCauldron.id);
         
-        // Remove from working list
+        // Remove from working list for THIS trip
         const index = remainingCauldrons.findIndex(c => c.id === nextCauldron.id);
         if (index >= 0) {
           remainingCauldrons.splice(index, 1);
         }
       } else {
-        console.log(`      ⚠️ ${nextCauldron.id} still at ${percentFullAfter.toFixed(1)}% after drain - needs more`);
-        // Keep in list for another witch to visit
+        console.log(`      ⚠️ ${nextCauldron.id} at ${percentFullAfter.toFixed(1)}% after drain - needs more visits`);
+        // Keep in list - it will be visited again soon
       }
     }
     
@@ -410,9 +790,9 @@ function buildSingleRoute(
     currentNode = nextCauldron.id;
     route.totalDistance += nextCauldron.travelTime;
     
-    // CRITICAL: Stop at 90% capacity (100L max!)
-    if (currentCapacity >= courierCapacity * 0.9) {
-      console.log(`    🛑 Trip ending: capacity nearly full (${currentCapacity.toFixed(1)}/${courierCapacity}L)`);
+    // CRITICAL: Stop at full capacity (100L max!)
+    if (currentCapacity >= courierCapacity) {
+      console.log(`    🛑 Trip ending: capacity full (${currentCapacity.toFixed(1)}/${courierCapacity}L)`);
       break;
     }
     
@@ -475,15 +855,19 @@ export function calculateMaxCycleTime(cauldrons) {
  * Generate optimal routes for minimum number of witches
  * This is the main optimization function
  */
-export function optimizeRoutes(cauldrons, levels, market, network, couriers) {
+export function optimizeRoutes(cauldrons, levels, market, network, couriers, allLevels = []) {
   console.log('🚀 Starting route optimization...');
   console.log('Input:', { 
     cauldrons: cauldrons.length, 
     levels: levels.length, 
     market: market?.id,
     networkEdges: network?.edges?.length,
-    couriers: couriers.length 
+    couriers: couriers.length,
+    historicalLevels: allLevels.length
   });
+  
+  // Calculate drain rates from historical data
+  const drainRates = calculateDrainRatesFromHistory(cauldrons, allLevels);
   
   // Build adjacency map from network
   const adjacency = buildAdjacencyMap(network);
@@ -496,9 +880,15 @@ export function optimizeRoutes(cauldrons, levels, market, network, couriers) {
     return null;
   }
   
-  // Calculate current state
-  const cauldronStates = calculateOverflowTimes(cauldrons, levels);
+  // Calculate current state with calculated drain rates
+  const cauldronStates = calculateOverflowTimes(cauldrons, levels, drainRates);
   console.log('⏰ Cauldron states calculated:', cauldronStates.length);
+  
+  // Debug: Check if drain rates are in the cauldron states
+  console.log('🔍 Sample cauldron states with drain rates:');
+  cauldronStates.slice(0, 3).forEach(c => {
+    console.log(`   ${c.id}: drainRate = ${c.drainRate?.toFixed(2) || 'UNDEFINED'} L/min, fillRate = ${c.fillRate?.toFixed(2)} L/min`);
+  });
   
   // Filter out cauldrons not in network or unreachable from market
   const reachableCauldrons = cauldronStates.filter(c => {
@@ -556,13 +946,19 @@ export function optimizeRoutes(cauldrons, levels, market, network, couriers) {
   let witchIndex = 0;
   let totalTrips = 0;
   
+  // Track total work time per witch (in minutes) - for informational purposes
+  const witchWorkTime = {}; // { witchId: totalMinutes }
+  
   // Keep making trips until all cauldrons are serviced
   while (unvisited.length > 0 && totalTrips < 200) {
-    // Try to use existing witches first before adding new ones
-    const witchForThisTrip = witchIndex % Math.max(1, Math.min(witchIndex + 1, MAX_WITCHES));
+    // Assign witches sequentially: A, B, C, D, E, F... (no wrapping back)
+    // Each new trip gets the next witch until we need more witches
+    // Witches can work as long as needed (no time limit)
+    const witchForThisTrip = witchIndex;
     
     console.log(`\n--- Trip ${totalTrips + 1} (Witch ${witchForThisTrip + 1}) ---`);
     console.log(`Remaining cauldrons needing service: ${unvisited.length}`);
+    console.log(`Current witch work time: ${((witchWorkTime[witchForThisTrip] || 0) / 60).toFixed(1)} hours`);
     console.log(`Unvisited: ${unvisited.map(c => c.id).join(', ')}`);
     
     const courier = couriers[witchForThisTrip % couriers.length];
@@ -574,6 +970,13 @@ export function optimizeRoutes(cauldrons, levels, market, network, couriers) {
       courierCapacity,
       0 // Each trip starts fresh from market
     );
+    
+    // Calculate total trip time (travel + drain + unload)
+    const tripDuration = route.totalTime || 0;
+    
+    // Track trip time for informational purposes
+    witchWorkTime[witchForThisTrip] = (witchWorkTime[witchForThisTrip] || 0) + tripDuration;
+    console.log(`  ⏱️ Trip took ${(tripDuration / 60).toFixed(1)} hours. Witch total: ${(witchWorkTime[witchForThisTrip] / 60).toFixed(1)} hours`);
     
     // Check if we made any progress
     if (visited.length === 0) {
@@ -623,9 +1026,14 @@ export function optimizeRoutes(cauldrons, levels, market, network, couriers) {
     // Find or create witch entry
     let witchEntry = routes.find(r => r.witchId === `witch_${witchForThisTrip + 1}`);
     if (!witchEntry) {
+      // Generate witch letter: A, B, C... Z, AA, AB, etc.
+      const witchLetter = witchForThisTrip < 26 
+        ? String.fromCharCode(65 + witchForThisTrip) // A-Z
+        : String.fromCharCode(65 + Math.floor(witchForThisTrip / 26) - 1) + String.fromCharCode(65 + (witchForThisTrip % 26)); // AA, AB, etc.
+      
       witchEntry = {
         witchId: `witch_${witchForThisTrip + 1}`,
-        witchName: courier.name || `Witch ${witchForThisTrip + 1}`,
+        witchName: `Witch ${witchLetter}`,
         capacity: courierCapacity,
         trips: [] // Multiple trips per witch!
       };
@@ -644,10 +1052,11 @@ export function optimizeRoutes(cauldrons, levels, market, network, couriers) {
       }
     });
     
-    // Also remove cauldrons that have been visited 3+ times (they're being managed)
+    // With low drain rates, cauldrons need MANY visits to stay under control
+    // Increase visit threshold from 3 to 10 to ensure adequate coverage
     const toRemove = [];
     unvisited.forEach(c => {
-      if (visitCount[c.id] >= 3) {
+      if (visitCount[c.id] >= 10) {
         console.log(`  ✅ ${c.id} visited ${visitCount[c.id]} times - considering it managed`);
         toRemove.push(c.id);
       }
@@ -673,9 +1082,15 @@ export function optimizeRoutes(cauldrons, levels, market, network, couriers) {
   console.log(`✅ Total trips across all witches: ${totalTrips}`);
   console.log(`✅ Cauldrons covered: ${reachableCauldrons.length - unvisited.length}/${reachableCauldrons.length}`);
   
-  // Show trips per witch
-  routes.forEach(witch => {
-    console.log(`  ${witch.witchName}: ${witch.trips.length} trips`);
+  // Show trips and work hours per witch
+  console.log(`\n📊 Witch Work Summary (no time limit):`);
+  routes.forEach((witch, idx) => {
+    const totalWorkTime = witchWorkTime[idx] || 0;
+    const hours = (totalWorkTime / 60).toFixed(1);
+    const witchLetter = idx < 26 
+      ? String.fromCharCode(65 + idx) 
+      : String.fromCharCode(65 + Math.floor(idx / 26) - 1) + String.fromCharCode(65 + (idx % 26));
+    console.log(`  Witch ${witchLetter}: ${witch.trips.length} trips, ${hours} hours total`);
   });
   
   if (unvisited.length > 0) {
@@ -684,6 +1099,10 @@ export function optimizeRoutes(cauldrons, levels, market, network, couriers) {
   } else {
     console.log('🎉 SUCCESS: All cauldrons will be serviced!');
   }
+  
+  // CRITICAL VERIFICATION: Check that no cauldrons will overflow
+  console.log(`\n🔍 OVERFLOW VERIFICATION:`);
+  verifyNoOverflows(routes, cauldronStates, levels);
   
   // Calculate statistics from all trips
   const totalVolume = routes.reduce((sum, witch) => {
@@ -702,6 +1121,7 @@ export function optimizeRoutes(cauldrons, levels, market, network, couriers) {
   
   return {
     routes,
+    drainRates, // Include calculated drain rates
     minWitches: routes.length,
     totalTrips,
     maxCycleTime,

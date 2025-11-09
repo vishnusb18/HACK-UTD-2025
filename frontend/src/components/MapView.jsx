@@ -242,7 +242,7 @@ function MapView() {
         {/* Cauldron rim */}
         <ellipse
           cx="0"
-          cy={-adjustedSize * 0.5}
+          cy={-adjustedSize * 0.7}
           rx={adjustedSize * 0.9}
           ry={adjustedSize * 0.25}
           fill={fillColor}

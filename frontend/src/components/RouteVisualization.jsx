@@ -11,15 +11,24 @@ function RouteVisualization({ routes, cauldrons, market, network, isAnimating, a
   const padding = 220;
 
   // Witch colors - high contrast, distinct colors against purple background
+  // Expanded palette for more witches (with 16-hour work limits, we need more)
   const witchColors = [
-    '#fbbf24', // bright yellow
-    '#06b6d4', // deep cyan/turquoise
-    '#86efac', // light green
-    '#fb923c', // bright orange
-    '#f87171', // bright red
-    '#c084fc', // light purple
-    '#22d3ee', // sky blue
-    '#fcd34d', // amber
+    '#fbbf24', // bright yellow (Witch A)
+    '#06b6d4', // deep cyan/turquoise (Witch B)
+    '#86efac', // light green (Witch C)
+    '#fb923c', // bright orange (Witch D)
+    '#f87171', // bright red (Witch E)
+    '#c084fc', // light purple (Witch F)
+    '#22d3ee', // sky blue (Witch G)
+    '#fcd34d', // amber (Witch H)
+    '#34d399', // emerald (Witch I)
+    '#f472b6', // pink (Witch J)
+    '#a78bfa', // violet (Witch K)
+    '#fde047', // yellow-300 (Witch L)
+    '#60a5fa', // blue-400 (Witch M)
+    '#f97316', // orange-500 (Witch N)
+    '#14b8a6', // teal-500 (Witch O)
+    '#ec4899', // pink-500 (Witch P)
   ];
 
   // Calculate positions for nodes using elliptical layout
@@ -192,12 +201,39 @@ function RouteVisualization({ routes, cauldrons, market, network, isAnimating, a
                 </g>
               );
 
-              // Draw stop number
+              // Draw stop number - adjusted position based on location to avoid overlaps
+              // For cauldrons near edges, adjust the number position
+              const mapWidth = 800;
+              const mapHeight = 600;
+              const margin = 50;
+              
+              // Determine if cauldron is near edges
+              const isNearTop = stopPos.y < margin;
+              const isNearBottom = stopPos.y > mapHeight - margin;
+              const isNearLeft = stopPos.x < margin;
+              const isNearRight = stopPos.x > mapWidth - margin;
+              
+              // Adjust circle and text position based on location
+              let circleX = stopPos.x;
+              let circleY = stopPos.y - 30; // Default: above cauldron
+              
+              if (isNearTop) {
+                circleY = stopPos.y + 50; // Move below cauldron if near top
+              } else if (isNearBottom) {
+                circleY = stopPos.y - 50; // Move further up if near bottom
+              }
+              
+              if (isNearLeft) {
+                circleX = stopPos.x + 30; // Move right if near left edge
+              } else if (isNearRight) {
+                circleX = stopPos.x - 30; // Move left if near right edge
+              }
+              
               pathElements.push(
                 <circle
                   key={`stop-${witchIdx}-${tripIdx}-${stopIdx}`}
-                  cx={stopPos.x}
-                  cy={stopPos.y}
+                  cx={circleX}
+                  cy={circleY}
                   r={15}
                   fill={color}
                   opacity={opacity}
@@ -207,8 +243,8 @@ function RouteVisualization({ routes, cauldrons, market, network, isAnimating, a
               pathElements.push(
                 <text
                   key={`stop-num-${witchIdx}-${tripIdx}-${stopIdx}`}
-                  x={stopPos.x}
-                  y={stopPos.y + 5}
+                  x={circleX}
+                  y={circleY + 5}
                   textAnchor="middle"
                   fontSize="14"
                   fontWeight="bold"
@@ -226,10 +262,13 @@ function RouteVisualization({ routes, cauldrons, market, network, isAnimating, a
           return <g key={`witch-${witchIdx}`}>{pathElements}</g>;
         })}
 
-        {/* Draw cauldrons */}
-        {cauldrons.map((cauldron) => {
+        {/* Draw cauldrons - Exact same shape as MapView */}
+        {cauldrons.map((cauldron, idx) => {
           const cauldronId = cauldron.id || cauldron.cauldronId || cauldron.cauldron_id;
           const pos = getNodePosition({ id: cauldronId });
+          const cauldronNumber = idx + 1;
+          const size = 32;
+          const adjustedSize = size * 2.7;
           
           // Check if this cauldron is in any selected route
           let stopData = []; // Array of {number, color} for this cauldron
@@ -259,34 +298,85 @@ function RouteVisualization({ routes, cauldrons, market, network, isAnimating, a
             }
           });
 
+          const isHovered = hoveredStop === cauldronId;
+          const scale = isHovered ? 1.15 : 1;
+          const fillColor = isInRoute ? '#6366f1' : '#374151';
+
           return (
             <g
               key={cauldronId}
+              transform={`translate(${pos.x}, ${pos.y}) scale(${scale})`}
               onMouseEnter={() => setHoveredStop(cauldronId)}
               onMouseLeave={() => setHoveredStop(null)}
               className="cursor-pointer"
             >
-              {/* Cauldron circle - make bigger to fit larger numbers */}
-              <circle
-                cx={pos.x}
-                cy={pos.y}
-                r={isInRoute ? 42 : 25}
-                fill={isInRoute ? '#1e1b4b' : '#475569'}
-                stroke={hoveredStop === cauldronId ? '#fbbf24' : '#94a3b8'}
-                strokeWidth={hoveredStop === cauldronId ? 4 : 2}
-                opacity={isInRoute ? 0.95 : 0.5}
+              {/* Cauldron body - EXACT MapView shape */}
+              <path
+                d={`M ${-adjustedSize} ${adjustedSize * 0.3} 
+                    Q ${-adjustedSize} ${adjustedSize * 1.2} 0 ${adjustedSize * 1.3}
+                    Q ${adjustedSize} ${adjustedSize * 1.2} ${adjustedSize} ${adjustedSize * 0.3}
+                    L ${adjustedSize * 0.8} ${-adjustedSize * 0.5}
+                    Q ${adjustedSize * 0.8} ${-adjustedSize * 0.8} ${adjustedSize * 0.5} ${-adjustedSize * 0.9}
+                    L ${-adjustedSize * 0.5} ${-adjustedSize * 0.9}
+                    Q ${-adjustedSize * 0.8} ${-adjustedSize * 0.8} ${-adjustedSize * 0.8} ${-adjustedSize * 0.5}
+                    Z`}
+                fill={fillColor}
+                stroke="#1f2937"
+                strokeWidth="4"
+                opacity="0.9"
               />
               
-              {/* Stop numbers with color coding - larger and better contrast */}
+              {/* Cauldron rim - EXACT MapView shape */}
+              <ellipse
+                cx="0"
+                cy={-adjustedSize * 0.7}
+                rx={adjustedSize * 0.9}
+                ry={adjustedSize * 0.25}
+                fill={fillColor}
+                stroke="#1f2937"
+                strokeWidth="4"
+                opacity="0.95"
+              />
+              
+              {/* Handle left */}
+              <path
+                d={`M ${-adjustedSize * 0.9} ${-adjustedSize * 0.3} Q ${-adjustedSize * 1.3} ${-adjustedSize * 0.2} ${-adjustedSize * 1.3} ${adjustedSize * 0.2}`}
+                fill="none"
+                stroke="#4b5563"
+                strokeWidth="6"
+              />
+              {/* Handle right */}
+              <path
+                d={`M ${adjustedSize * 0.9} ${-adjustedSize * 0.3} Q ${adjustedSize * 1.3} ${-adjustedSize * 0.2} ${adjustedSize * 1.3} ${adjustedSize * 0.2}`}
+                fill="none"
+                stroke="#4b5563"
+                strokeWidth="6"
+              />
+              
+              {/* Cauldron number */}
+              <text
+                x="0"
+                y={adjustedSize * 0.5}
+                textAnchor="middle"
+                fill="#fff"
+                fontSize="42"
+                fontWeight="bold"
+                stroke="#1f2937"
+                strokeWidth="1.5"
+              >
+                {cauldronNumber}
+              </text>
+              
+              {/* Stop numbers with color coding - positioned above cauldron */}
               {stopData.length > 0 && (
                 <text
-                  x={pos.x}
-                  y={pos.y}
+                  x="0"
+                  y={-adjustedSize * 2.0}
                   textAnchor="middle"
                   dominantBaseline="central"
-                  fontSize="32"
+                  fontSize="42"
                   fontWeight="bold"
-                  style={{ textShadow: '0 0 4px rgba(0,0,0,0.8)' }}
+                  style={{ textShadow: '0 0 8px rgba(0,0,0,0.9), 0 0 4px rgba(0,0,0,0.9)' }}
                 >
                   {stopData.map((stop, idx) => (
                     <tspan key={idx} fill={stop.color}>
@@ -295,49 +385,69 @@ function RouteVisualization({ routes, cauldrons, market, network, isAnimating, a
                   ))}
                 </text>
               )}
-              
-              {/* Cauldron label */}
-              <text
-                x={pos.x}
-                y={pos.y + 50}
-                textAnchor="middle"
-                fill="white"
-                fontSize="16"
-                fontWeight="500"
-              >
-                {cauldron.name || cauldronId}
-              </text>
             </g>
           );
         })}
 
-        {/* Draw market */}
-        <g>
-          <circle
-            cx={marketPos.x}
-            cy={marketPos.y}
-            r={50}
-            fill="#ec4899"
-            stroke="#fbbf24"
-            strokeWidth="4"
+        {/* Draw market - MapView style */}
+        <g transform={`translate(${marketPos.x}, ${marketPos.y})`}>
+          {/* Market building */}
+          <rect
+            x={-60}
+            y={-30}
+            width={120}
+            height={90}
+            fill="#8b5cf6"
+            stroke="#1f2937"
+            strokeWidth="4.5"
+            rx="8"
           />
+          {/* Roof */}
+          <path
+            d={`M -72 -30 L 0 -78 L 72 -30 Z`}
+            fill="#7c3aed"
+            stroke="#1f2937"
+            strokeWidth="4.5"
+          />
+          {/* Door */}
+          <rect
+            x={-18}
+            y={18}
+            width={36}
+            height={42}
+            fill="#6d28d9"
+            stroke="#1f2937"
+            strokeWidth="3"
+            rx="6"
+          />
+          {/* Windows */}
+          <rect
+            x={-42}
+            y={-12}
+            width={24}
+            height={24}
+            fill="#fbbf24"
+            stroke="#1f2937"
+            strokeWidth="2.5"
+            rx="3"
+          />
+          <rect
+            x={18}
+            y={-12}
+            width={24}
+            height={24}
+            fill="#fbbf24"
+            stroke="#1f2937"
+            strokeWidth="2.5"
+            rx="3"
+          />
+          {/* Market label */}
           <text
-            x={marketPos.x}
-            y={marketPos.y}
-            textAnchor="middle"
-            dominantBaseline="central"
-            fill="white"
-            fontSize="32"
-            fontWeight="bold"
-          >
-            🏪
-          </text>
-          <text
-            x={marketPos.x}
-            y={marketPos.y + 70}
+            x="0"
+            y="90"
             textAnchor="middle"
             fill="#fbbf24"
-            fontSize="20"
+            fontSize="24"
             fontWeight="bold"
           >
             Market
@@ -357,8 +467,8 @@ function RouteVisualization({ routes, cauldrons, market, network, isAnimating, a
         }
       `}</style>
 
-      {/* Witch selector */}
-      <div className="absolute top-4 left-4 bg-gray-900/90 p-3 rounded-lg">
+      {/* Witch selector - moved further down */}
+      <div className="absolute top-24 left-4 bg-gray-900/90 p-3 rounded-lg">
         <div className="text-white font-semibold mb-2 text-sm">Select Witch:</div>
         <div className="flex flex-wrap gap-2">
           <button
@@ -397,10 +507,6 @@ function RouteVisualization({ routes, cauldrons, market, network, isAnimating, a
           <div className="flex items-center gap-2">
             <div className="w-8 h-0.5 bg-purple-500"></div>
             <span>Route path</span>
-          </div>
-          <div className="flex items-center gap-2">
-            <div className="w-8 h-0.5 bg-purple-500 border-t-2 border-dashed"></div>
-            <span>Return to market</span>
           </div>
           <div className="flex items-center gap-2">
             <div className="w-4 h-4 rounded-full bg-purple-500 flex items-center justify-center text-white font-bold text-xs">1</div>
