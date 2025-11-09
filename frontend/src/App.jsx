@@ -7,6 +7,7 @@ import LevelChart from './components/LevelChart';
 import ReconciliationPanel from './components/ReconciliationPanel';
 import MapView from './components/MapView';
 import CauldronDetail from './components/CauldronDetail';
+import { computePerCauldronSeries, aggregateDrainsPerCauldron } from './utils/reconciliation';
 
 function Dashboard() {
   const [cauldrons, setCauldrons] = useState([]);
@@ -71,8 +72,20 @@ function Dashboard() {
         errors.push(`levels/history: ${e.message}`);
       }
 
-      // set what we have
-  setCauldrons(cauldronData || []);
+      // compute fill rates from historical level data and merge into cauldron objects
+      let enrichedCauldrons = cauldronData || [];
+      try {
+        const byId = computePerCauldronSeries(historyLevels || []);
+        const perCauldronAgg = aggregateDrainsPerCauldron(byId);
+        enrichedCauldrons = (cauldronData || []).map(c => ({
+          ...c,
+          fillRate: perCauldronAgg[c.id || c.cauldronId || c.cauldron_id]?.fillRate ?? c.fillRate ?? c.fill_rate ?? 0
+        }));
+      } catch (e) {
+        console.warn('Failed to compute per-cauldron fill rates:', e);
+      }
+
+  setCauldrons(enrichedCauldrons);
   // handle wrapper shapes from backend (some endpoints return { value: [...] } or { transport_tickets: [...] })
   setTickets(
     Array.isArray(ticketData)
