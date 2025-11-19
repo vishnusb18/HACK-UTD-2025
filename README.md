@@ -1,10 +1,10 @@
-# 🧙‍♀️ PotionFlow - Potion Monitoring Dashboard
+# PotionFlow - Potion Monitoring Dashboard
 
-# 🧙‍♀️ Poyo's Potion Dashboard
+#  Poyo's Potion Dashboard
 
 A real-time monitoring dashboard for tracking potion levels across magical cauldrons in the Enchanted Market.
 
-## 🏗️ Project Structure
+##  Project Structure
 
 ```
 HACK-UTD-2025/
@@ -144,9 +144,9 @@ Detect drain events and match with transport tickets
 }
 ```
 
-## 🎯 Features
+##  Features
 
-### ✅ Implemented
+###  Implemented
 
 - **Real HackUTD API Integration**: Fetches live data from `https://hackutd2025.eog.systems`
 - **Cauldron Management**: Track all cauldrons with location, capacity, and fill rates
@@ -156,7 +156,7 @@ Detect drain events and match with transport tickets
 - **Dashboard UI**: Beautiful, responsive dashboard with multiple views
 - **Data Processing**: Backend proxies and processes HackUTD API data
 
-### 🌟 Ready for Extension (Bonus Features)
+###  Ready for Extension (Bonus Features)
 
 The base structure is ready for these enhancements:
 - **Potion Network Map**: Visualize cauldrons and routes on a map
@@ -165,7 +165,7 @@ The base structure is ready for these enhancements:
 - **Route Optimization**: Calculate optimal witch courier routes
 - **Alert System**: Notifications for critical levels or discrepancies
 
-## 🗄️ Database Schema
+##  Database Schema
 
 ### Cauldrons Table
 - `id`: Primary key
@@ -202,7 +202,7 @@ The base structure is ready for these enhancements:
 - Tailwind CSS (styling)
 - Modern ES6+ JavaScript
 
-## 📝 Development Scripts
+##  Development Scripts
 
 ### Backend
 ```powershell
@@ -218,21 +218,21 @@ npm run build   # Build for production
 npm run preview # Preview production build
 ```
 
-## 🎨 Dashboard Features
+##  Dashboard Features
 
 1. **Overview Tab**: Summary stats and current cauldron status
 2. **Cauldrons Tab**: Detailed view of all cauldrons with fill percentages
 3. **Tickets Tab**: Searchable list of transport tickets
 4. **Reconcile Tab**: Run discrepancy detection for any date
 
-## 🧪 Data Source
+##  Data Source
 
 The app now fetches **REAL DATA** from the HackUTD 2025 API:
 - **Live Cauldrons**: Actual cauldron configurations from the competition
 - **Historical Data**: Real potion level readings over time
 - **Transport Tickets**: Actual collection records for validation
 
-## 🔧 Troubleshooting
+##  Troubleshooting
 
 **Backend won't start:**
 - Make sure port 3001 is not in use
@@ -245,7 +245,7 @@ The app now fetches **REAL DATA** from the HackUTD 2025 API:
 **Database errors:**
 - Delete `backend/database/potionflow.db` and run `npm run init-db` again
 
-## 🎓 Hackathon Notes
+##  Hackathon Notes
 
 This is the base setup for the HACK UTD 2025 PotionFlow project. The structure is designed to be easily extended with:
 - Real API integration for actual data
@@ -256,8 +256,8 @@ This is the base setup for the HACK UTD 2025 PotionFlow project. The structure i
 
 ## 📄 License
 
-MIT License - feel free to use and modify for your hackathon project!
+MIT License 
 
 ---
 
-Made with ✨ magic for HACK UTD 2025
+Made with  magic for HACK UTD 2025
